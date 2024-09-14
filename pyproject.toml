@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "countbeans"
+version = "0.1.0"
+description = "Telegram bot for managing and splitting expenses within Telegram groups"
+authors = ["Daniel Ong <ongfishh@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "countbeans", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+telethon = "^1.36.0"
+fastapi = "^0.114.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
