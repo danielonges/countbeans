@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 
 from aiogram import Bot, Dispatcher, F
@@ -6,9 +7,9 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from countbeans.config import get_settings
-from countbeans.logging import get_logger, setup as setup_logging
+from countbeans.logging import setup as setup_logging
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 dp = Dispatcher()
 

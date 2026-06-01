@@ -1,3 +1,3 @@
-from countbeans.logging.core import get_logger, setup
+from countbeans.logging.core import setup
 
-__all__ = ["get_logger", "setup"]
+__all__ = ["setup"]
