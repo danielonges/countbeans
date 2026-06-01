@@ -28,7 +28,7 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     simplify_debts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
-        CheckConstraint("LENGTH(default_currency) = 3", name="ck_groups_default_currency_len"),
+        CheckConstraint("LENGTH(default_currency) = 3", name="default_currency_len"),
     )
 
 
@@ -61,8 +61,8 @@ class Expense(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     voided_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     __table_args__ = (
-        CheckConstraint("amount_cents > 0", name="ck_expenses_amount_positive"),
-        CheckConstraint("LENGTH(currency) = 3", name="ck_expenses_currency_len"),
+        CheckConstraint("amount_cents > 0", name="amount_positive"),
+        CheckConstraint("LENGTH(currency) = 3", name="currency_len"),
     )
 
 
@@ -78,7 +78,7 @@ class ExpenseShare(Base):
     share_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     __table_args__ = (
-        CheckConstraint("share_cents >= 0", name="ck_expense_shares_nonneg"),
+        CheckConstraint("share_cents >= 0", name="nonneg"),
     )
 
 
@@ -92,7 +92,7 @@ class Settlement(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("amount_cents > 0", name="ck_settlements_amount_positive"),
-        CheckConstraint("LENGTH(currency) = 3", name="ck_settlements_currency_len"),
-        CheckConstraint("from_user_id <> to_user_id", name="ck_settlements_different_users"),
+        CheckConstraint("amount_cents > 0", name="amount_positive"),
+        CheckConstraint("LENGTH(currency) = 3", name="currency_len"),
+        CheckConstraint("from_user_id <> to_user_id", name="different_users"),
     )

@@ -14,4 +14,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 
+# Ship migrations so the container can run `alembic upgrade head` on deploy
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
 CMD ["uv", "run", "countbeans"]

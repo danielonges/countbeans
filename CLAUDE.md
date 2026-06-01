@@ -41,6 +41,50 @@ docker compose down
 docker compose down -v
 ```
 
+## Database migrations (Alembic)
+
+Migrations are **applied as a separate, explicit step** — never auto-run on bot
+startup. The `migrate` service in `compose.yml` is profile-gated, so a plain
+`docker compose up` starts only `db` + `bot` and never touches the schema. The
+image ships `alembic/` and `alembic.ini`, so the migrate step needs no volume
+mounts.
+
+**Deploy ordering: migrate first, then start the bot.**
+
+```bash
+# Apply all pending migrations (run before deploying/starting the bot)
+docker compose run --rm migrate
+
+# Then start the bot
+docker compose up -d bot
+```
+
+**Authoring a new migration.** Autogenerate compares the ORM models in
+`src/countbeans/db/` against the live DB, so the DB must be reachable and at
+head first. Because the bot image doesn't contain the `versions/` directory you
+are *writing into*, bind-mount `alembic/` and `alembic.ini` when generating (the
+applied `migrate` step above does not need this):
+
+```bash
+docker compose run --rm \
+  -v "$PWD/alembic:/app/alembic" -v "$PWD/alembic.ini:/app/alembic.ini" \
+  migrate uv run alembic revision --autogenerate -m "describe change"
+```
+
+Then review the generated file in `alembic/versions/`, apply it with
+`docker compose run --rm migrate`, and commit it. `alembic check` (no pending
+ops) and a `downgrade base` → `upgrade head` round-trip are good sanity checks.
+
+- **Constraint naming:** `Base.metadata` carries a `naming_convention` (see
+  `src/countbeans/db/_base.py`), so every PK/FK/unique/check/index gets a
+  deterministic name. Name `CheckConstraint`s with the logical suffix only
+  (e.g. `amount_positive`) — the convention prefixes `ck_<table>_`.
+- **env.py** loads the DSN from `Settings` (never `alembic.ini`) and enables
+  `compare_type` / `compare_server_default` so type and default drift is caught.
+- **Host-side Alembic** (outside Docker) works only if Docker Desktop forwards
+  the published `5433` port; if it doesn't on your machine, use the in-container
+  commands above.
+
 ## Architecture
 
 The architectural commitment is a **standalone, framework-agnostic service core** (`countbeans.services`, the "Expense manager") that owns all database access and knows nothing about Telegram or HTTP. Everything else is a **thin adapter** over it. Today there is exactly one adapter — the `aiogram` bot — calling the core **in-process** (same process, plain Python function calls, no network hop). An HTTP layer is **deferred** (see "The HTTP layer is deferred" below), not part of the current build.

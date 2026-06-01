@@ -1,3 +1,13 @@
+# Shared so the bot and the one-off migrate step never drift apart.
+x-database-url: &database-url postgresql+asyncpg://countbeans:countbeans@db:5432/countbeans
+
+x-app: &app
+  build: .
+  env_file: .env
+  depends_on:
+    db:
+      condition: service_healthy
+
 services:
   db:
     image: postgres:17-alpine
@@ -17,15 +27,21 @@ services:
       retries: 5
 
   bot:
-    build: .
+    <<: *app
     restart: unless-stopped
-    env_file: .env
     environment:
-      COUNTBEANS_DATABASE_URL: postgresql+asyncpg://countbeans:countbeans@db:5432/countbeans
+      COUNTBEANS_DATABASE_URL: *database-url
       COUNTBEANS_LOG_FORMAT: json
-    depends_on:
-      db:
-        condition: service_healthy
+
+  # One-off migration step. Behind a profile so `docker compose up` never runs
+  # it — apply migrations explicitly before deploying the bot:
+  #   docker compose run --rm migrate
+  migrate:
+    <<: *app
+    profiles: ["migrate"]
+    environment:
+      COUNTBEANS_DATABASE_URL: *database-url
+    command: ["uv", "run", "alembic", "upgrade", "head"]
 
 volumes:
   db_data:
