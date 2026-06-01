@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     api_id: int
     api_hash: str
     bot_token: str
+    database_url: str
     log_level: str = "INFO"
     log_format: str = "text"
 
