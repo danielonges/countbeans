@@ -207,7 +207,7 @@ A split is two independent choices: **who** is in it (participant selection) and
 **Participant selection** — splitting with only some of the group:
 
 - **Named subset (default):** `/addexpense 50 Dinner @a @b` splits among the named users **plus the payer**. This is how you split with only selected people — only those listed (and the payer) get a share.
-- **Everyone:** with no mentions (or an `@all` keyword), split across all current members from `group_members`, validated at split time via `getChatMember` (see Onboarding).
+- **Everyone:** with no mentions (or an `@all` keyword), split across all current members from `group_members` (pending placeholders included). Because the bot can't enumerate the real roster, `@all` means "everyone the bot knows" — see the coverage check below.
 - **Excluding the payer:** the payer is included by default; excluding them (they paid but didn't partake) just drops their share, leaving them owed the full amount.
 
 **Split modes** — dividing the amount unevenly:
@@ -296,11 +296,21 @@ Parse first, then validate:
    - All suffixes are bare numbers → **exact**; must sum to the amount.
    - **Mixing families is rejected** (`@a:30 @b:40%` → error), and in any non-equal mode **every** participant must carry a suffix of that family (`@a:60% @b` → error).
 4. **Participants** — duplicate handles are rejected. The payer is added automatically (deduped if they also @mention themselves); an explicit exclude flag drops the payer's share.
-5. **`@all`** — must appear alone with no suffixes; splits equally across all current `group_members`. Omitting mentions entirely is equivalent to `@all`.
+5. **`@all`** — must appear alone with no suffixes; splits equally across all current `group_members` (placeholders included). Omitting mentions entirely is equivalent to `@all`. Since the bot cannot enumerate the real roster, it runs a **coverage check** and **blocks until confirmed** on any gap (see below).
 6. **Unknown handles are not errors** — they become pending placeholders (see Onboarding).
 7. Fractional percentages (≤2 dp) are carried as integer **basis points** (sum must be 10000) so `apportion` stays integer-only.
 
 `/settleup @user <amount>` — `<amount>` follows rule 1; `@user` must resolve to a participant (or becomes a placeholder); settling with yourself is rejected.
+
+**`@all` coverage check (block-until-confirmed).** The bot can't list members, but `getChatMemberCount` (available to any bot) tells it how many there *are*. At `@all` time compare the count it can split among against the real count:
+
+```
+known  = active rows in group_members      # who the bot can actually split among
+actual = getChatMemberCount() - 1          # minus the bot itself
+```
+
+- `known == actual` → the bot demonstrably knows everyone; record the expense.
+- `known <  actual` → there are members the bot has never seen and **cannot name**. **Do not record.** Reply with who *would* be included and the gap ("splitting among these 3; this group has 5 — 2 I haven't seen yet"), and require the payer to either confirm "just these people" or have the missing members `/start` first. The only way to actually include an unseen member is for them to interact — there is no API to pull them in (admin's `chat_member` stream captures *future* joiners, never pre-existing silent ones).
 
 ### Debt simplification (should-have)
 
