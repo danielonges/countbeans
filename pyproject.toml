@@ -12,9 +12,8 @@ dependencies = [
     "sqlalchemy>=2.0.40",
     "asyncpg>=0.30.0",
     "alembic>=1.15.2",
-    "python-telegram-bot>=22.0",
-    "telethon>=1.39.0",
     "deepagents>=0.4.12",
+    "aiogram>=3.28.2",
 ]
 
 [tool.uv]
