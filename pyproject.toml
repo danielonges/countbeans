@@ -35,7 +35,15 @@ dev = [
     "watchfiles>=1.2.0",
     "testcontainers[postgres]>=4.0.0",
     "psycopg2-binary>=2.9.0",
+    "pyright>=1.1.409",
 ]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
