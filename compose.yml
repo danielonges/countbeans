@@ -29,7 +29,6 @@ services:
     restart: unless-stopped
     environment:
       COUNTBEANS_DATABASE_URL: *database-url
-      COUNTBEANS_LOG_FORMAT: json
 
   # One-off migration step. Behind a profile so `docker compose up` never runs
   # it — apply migrations explicitly before deploying the bot:

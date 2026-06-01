@@ -8,8 +8,8 @@ from countbeans.logging import setup as setup_logging
 
 def main() -> int:
     settings = get_settings()
-    setup_logging(level=settings.log_level, fmt=settings.log_format)
-    asyncio.run(run(settings.bot_token))
+    setup_logging(level=settings.log_level)
+    asyncio.run(run(settings.bot_token.get_secret_value()))
     return 0
 
 

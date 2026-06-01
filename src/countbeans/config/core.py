@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     bot_token: SecretStr
     database_url: PostgresDsn
     log_level: str = "INFO"
-    log_format: str = "text"
 
 
 @cache
