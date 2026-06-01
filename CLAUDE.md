@@ -121,7 +121,9 @@ All config lives in `src/countbeans/config/core.py` using `pydantic-settings`. E
 | `COUNTBEANS_BOT_TOKEN` | `str` | Telegram bot token |
 | `COUNTBEANS_DATABASE_URL` | `str` | SQLAlchemy async DSN, e.g. `postgresql+asyncpg://user:pass@host:5432/db` |
 
-All fields are required — the app will raise a `ValidationError` at startup if any are missing. Use a `.env` file at the project root. When running via Docker Compose, `COUNTBEANS_DATABASE_URL` is injected automatically by `compose.yml`; the other three must be present in `.env`.
+All fields are required — the app will raise a `ValidationError` at startup if any are missing. Use a `.env` file at the project root (copy `.env.example` and fill in the values). When running via Docker Compose, `COUNTBEANS_DATABASE_URL` is injected automatically by `compose.yml`; the other three must be present in `.env`.
+
+> **TODO (before production deploy): set up proper secret management for DB credentials.** The current `compose.yml` hardcodes the Postgres username and password — fine for local dev since the DB is not exposed to the internet, but not for a real server. The right approach depends on the deploy target: Railway/Render/Fly.io provision Postgres and inject `DATABASE_URL` automatically (nothing to do); a VPS needs either a `.env` created over SSH or Docker Secrets; larger setups use a secrets manager (AWS Secrets Manager, Vault, etc.). No code changes are needed — `pydantic-settings` reads from the environment regardless of where the value comes from. Revisit this when the deployment target is chosen.
 
 ## Product Spec
 
