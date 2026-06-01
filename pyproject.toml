@@ -6,15 +6,16 @@ authors = [{ name = "Daniel Ong", email = "ongfishh@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.135.2",
     "pydantic-settings>=2.8.1",
-    "uvicorn>=0.34.0",
     "sqlalchemy>=2.0.40",
     "asyncpg>=0.30.0",
     "alembic>=1.15.2",
     "aiogram>=3.28.2",
     "uuid-utils>=0.16.0",
 ]
+
+[project.scripts]
+countbeans = "countbeans.main:main"
 
 [tool.uv]
 package = true
