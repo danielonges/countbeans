@@ -27,7 +27,7 @@ uv run pytest tests/path/to/test_file.py::test_name
 The project has two runtime entry points that currently operate independently:
 
 - **Telegram bot** (`src/countbeans/main.py`): Built with `aiogram` (async-first Bot API). Handles group chat commands and is the primary user-facing interface. Run via `uv run countbeans`.
-- **FastAPI server** (`src/countbeans/apis/`): HTTP API layer, intended for AI agent interactions via `deepagents`.
+- **FastAPI server** (`src/countbeans/apis/`): HTTP API layer (planned; not yet implemented).
 
 Both share the config in `src/countbeans/config/` for settings (see below).
 
