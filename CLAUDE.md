@@ -119,7 +119,7 @@ The layers and their responsibilities:
 
 All layers share the config in `src/countbeans/config/` for settings (see below).
 
-**Planned data layer**: PostgreSQL via SQLAlchemy + asyncpg, with Alembic for migrations. The schema (users, groups, group_members, expenses, expense_shares, settlements) is specified in the Product Spec below but not yet implemented. Balances are **derived** from the ledger, not stored.
+**Planned data layer**: PostgreSQL via SQLAlchemy + asyncpg, with Alembic for migrations. The schema (users, groups, group_members, events, event_members, expenses, expense_shares, settlements) is specified in the Product Spec below but not yet implemented. Balances are **derived** from the ledger, not stored.
 
 **Database sessions — caller-managed Unit of Work.** There is no DI framework (no FastAPI `Depends`); session lifecycle is handled explicitly via a **caller-managed Unit of Work**. The session is *passed into* service functions, not opened by them — the transaction boundary lives one level above the operation, which is what enables atomic multi-op composition and rollback-per-test.
 
@@ -133,9 +133,9 @@ The deliberate trade vs. each service method opening its own session: the bounda
 
 **Pydantic DTOs — shared vocabulary in `countbeans.dto`.** The service core accepts and returns plain Pydantic models — never `aiogram` types, never SQLAlchemy ORM rows, never raw dicts. These live in a dedicated **`src/countbeans/dto/`** package so both the bot layer and the service core can import them without either depending on the other's internals. Three sub-modules:
 
-- **`dto/commands.py` — inbound to the service core.** One class per mutating operation, carrying everything the core needs, with no Telegram types: `AddExpenseCommand`, `SettleUpCommand`, `OnboardUserCommand`. The bot parses the raw Telegram message and constructs one of these — the handoff point between layers.
-- **`dto/results.py` — outbound from the service core after a write.** Confirmations returned to the bot for reply formatting: `ExpenseCreatedResult`, `SettlementCreatedResult`. Carry only what the bot needs to format a reply (IDs, computed cents, participant list) — not full ledger rows.
-- **`dto/domain.py` — read-side representations.** Derived views returned by queries: `MemberBalance`, `Transfer`, `GroupSummary`. Used by `/balance` and `/group` responses. `Transfer` is what `simplify()` returns: `(debtor_id, creditor_id, amount_cents)`.
+- **`dto/commands.py` — inbound to the service core.** One class per mutating operation, carrying everything the core needs, with no Telegram types: `AddExpenseCommand`, `SettleUpCommand`, `OnboardUserCommand`. `AddExpenseCommand` and `SettleUpCommand` carry an optional `event_id`; event management adds `CreateEventCommand`, `SetActiveEventCommand`, `CloseEventCommand`, and `EditEventRosterCommand` (see "Events"). The bot parses the raw Telegram message and constructs one of these — the handoff point between layers.
+- **`dto/results.py` — outbound from the service core after a write.** Confirmations returned to the bot for reply formatting: `ExpenseCreatedResult`, `SettlementCreatedResult`, `EventCreatedResult`. Carry only what the bot needs to format a reply (IDs, computed cents, participant list) — not full ledger rows.
+- **`dto/domain.py` — read-side representations.** Derived views returned by queries: `MemberBalance`, `Transfer`, `GroupSummary`, `EventSummary`. Used by `/balance`, `/group`, and `/event` responses. `Transfer` is what `simplify()` returns: `(debtor_id, creditor_id, amount_cents)`.
 
 **Conventions that apply to every DTO:**
 
@@ -201,10 +201,11 @@ These cut across the whole data model and are the reason the schema below differ
 ### Key commands
 
 - `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
-- `/balance [all]` — `/balance` shows the caller's own net position with other members; `/balance all` shows **every member's** net balance (per currency) plus the suggested settle-up transfers. Both are derived from the ledger. The suggested transfers honor the group's **debt-simplification setting**: when on, they are the simplified (reduced) set; when off, they are the raw pairwise debts. The per-member net balances are identical either way — the toggle only changes how the *suggested transfers* are presented.
-- `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`.
+- `/balance [all]` — `/balance` shows the caller's own net position with other members; `/balance all` shows **every member's** net balance (per currency) plus the suggested settle-up transfers. Both are derived from the ledger. The suggested transfers honor the group's **debt-simplification setting**: when on, they are the simplified (reduced) set; when off, they are the raw pairwise debts. The per-member net balances are identical either way — the toggle only changes how the *suggested transfers* are presented. When an event is active, `/balance` defaults to that event's scope; a scope can be named read-only (`/balance general`, `/balance "<event>"`) to peek at another without ending the active one (see "Events").
+- `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`. While an event is active it auto-tags the settlement to that event (writes are strictly active-scoped); settle a *general* debt by `/event pause`-ing first (the event stays open).
 - `/simplify [on|off]` — view or change the group's debt-simplification setting. `/simplify` with no argument reports the current state (any member). `/simplify on` / `/simplify off` flips it and is **admin-only**: the bot checks the caller via `getChatMember` and refuses (no state change) unless their status is `creator` or `administrator`. The setting is purely presentational — see "Debt simplification".
-- `/group` — show group info: name, default currency, and the **debt-simplification setting** (on/off); the **known members** the bot can split among, with pending placeholders flagged separately (mentioned but not yet `/start`-ed); the **coverage gap** (`known` vs `getChatMemberCount`) so people can see who still needs to join; and a quick activity summary (active expenses and total tracked, per currency).
+- `/group` — show group info: name, default currency, and the **debt-simplification setting** (on/off); the **known members** the bot can split among, with pending placeholders flagged separately (mentioned but not yet `/start`-ed); the **coverage gap** (`known` vs `getChatMemberCount`) so people can see who still needs to join; the **active event** (if any) and the list of open events; and a quick activity summary (active expenses and total tracked, per currency).
+- `/event …` — manage ad-hoc event scopes (see "Events"). A group has **at most one open event at a time**. `/event new "<name>" [CUR]` begins one (create + open + activate; rejected if one is already open — close it first); `/event pause` / `/event resume` stop or restore auto-tagging without closing (so you can log a *general* expense mid-event); `/event close` finishes the open event and frees the slot; `/event reopen "<name>"` reopens a closed one (only when none is open); `/event add|remove @user` edit the roster; `/event list` and `/event` (no arg) report events and the active scope. Any member may run these.
 
 ### Components
 
@@ -260,11 +261,18 @@ CREATE TABLE groups (
   id                UUID PRIMARY KEY,       -- UUID7, generated in app layer
   telegram_chat_id  BIGINT UNIQUE NOT NULL, -- Telegram chat ID
   group_name        VARCHAR(255),
-  default_currency  CHAR(3) NOT NULL DEFAULT 'USD',   -- ISO 4217
+  default_currency  CHAR(3) NOT NULL DEFAULT 'SGD',   -- ISO 4217
   -- Debt-simplification toggle (admin-only via /simplify). Purely a display
   -- preference: it changes how /balance all *suggests* transfers, never the
   -- ledger or derived balances, so flipping it any number of times is safe.
-  simplify_debts    BOOLEAN NOT NULL DEFAULT FALSE,
+  simplify_debts    BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Active event for "active-event mode" (see "Events"): when non-NULL it points
+  -- at the group's single OPEN event and /addexpense & /settleup auto-tag to it;
+  -- NULL = general tracking (no open event, or the open event is paused).
+  -- Shared across all members and durable across restarts, so it lives in the
+  -- DB here, NOT in aiogram FSM (FSM holds only per-conversation multi-step
+  -- state). FK added after `events` exists — groups<->events is circular.
+  active_event_id   UUID REFERENCES events(id),
   CHECK (LENGTH(default_currency) = 3)
 );
 
@@ -279,10 +287,51 @@ CREATE TABLE group_members (
   PRIMARY KEY (group_id, user_id, joined_at)
 );
 
+-- Ad-hoc sub-scopes within a group (e.g. a trip) for tracking a bounded set of
+-- expenses separately from regular tracking. An event is a *scope dimension* on
+-- the one shared ledger, never a separate ledger: expenses/settlements carry a
+-- nullable event_id (NULL = general/regular tracking) and balances are derived
+-- per scope. Isolated by design — the general balance excludes event-tagged
+-- rows and each event settles independently; there is no cross-event netting.
+-- App invariant: at most one OPEN event per group at a time (enforced by the
+-- partial unique index below) — a new event opens only after the current one is
+-- closed, so which event is in play is never ambiguous. Closed events may
+-- freely reuse a name.
+CREATE TABLE events (
+  id                UUID PRIMARY KEY,                    -- UUID7, generated in app layer
+  group_id          UUID NOT NULL REFERENCES groups(id),
+  name              VARCHAR(255) NOT NULL,
+  default_currency  CHAR(3),                             -- NULL = inherit groups.default_currency
+  status            VARCHAR(16) NOT NULL DEFAULT 'open', -- 'open' | 'closed'
+  created_by        UUID NOT NULL REFERENCES users(id),
+  created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  closed_at         TIMESTAMP WITH TIME ZONE,            -- NULL = open; set when status -> 'closed'
+  CHECK (status IN ('open', 'closed')),
+  CHECK (default_currency IS NULL OR LENGTH(default_currency) = 3)
+);
+
+-- At most one OPEN event per group: a new event can be opened only after the
+-- current one is closed. (The app also enforces this with a friendly
+-- "close <name> first" instead of surfacing the raw index violation.)
+CREATE UNIQUE INDEX uq_events_one_open_per_group ON events (group_id) WHERE status = 'open';
+
+-- Explicit per-event roster: a deliberate opt-in SUBSET of the group (the trip
+-- attendees). `@all` inside an active event means THIS roster, not the whole
+-- group, so the group-level getChatMemberCount coverage check does not apply.
+-- Grows implicitly (the creator on /event new; anyone named as a participant
+-- in an event expense) and explicitly (/event add|remove). References users.id,
+-- so claiming a placeholder needs no rewrite here either.
+CREATE TABLE event_members (
+  event_id  UUID NOT NULL REFERENCES events(id),
+  user_id   UUID NOT NULL REFERENCES users(id),
+  PRIMARY KEY (event_id, user_id)
+);
+
 -- Immutable expense events; soft-deleted via voided_at
 CREATE TABLE expenses (
   expense_id    UUID PRIMARY KEY,            -- UUID7, generated in app layer
   group_id      UUID NOT NULL REFERENCES groups(id),
+  event_id      UUID REFERENCES events(id),                 -- NULL = general/regular tracking
   payer_id      UUID NOT NULL REFERENCES users(id),
   amount_cents  BIGINT NOT NULL CHECK (amount_cents > 0),   -- integer minor units
   currency      CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
@@ -305,6 +354,7 @@ CREATE TABLE expense_shares (
 CREATE TABLE settlements (
   settlement_id  UUID PRIMARY KEY,           -- UUID7, generated in app layer
   group_id       UUID NOT NULL REFERENCES groups(id),
+  event_id       UUID REFERENCES events(id),            -- NULL = general/regular tracking
   from_user_id   UUID NOT NULL REFERENCES users(id),    -- pays
   to_user_id     UUID NOT NULL REFERENCES users(id),    -- receives
   amount_cents   BIGINT NOT NULL CHECK (amount_cents > 0),
@@ -326,6 +376,8 @@ balance(u) =  Σ amount_cents  of active expenses where payer = u      -- money 
 ```
 
 Because shares always sum to the expense amount, the balances of all members in a group sum to zero — a useful invariant to assert in tests.
+
+**Per scope.** With events (see "Events"), every term above is filtered by `event_id`: the general balance sums only rows where `event_id IS NULL`, and an event's balance sums only that event's rows. The sum-to-zero invariant therefore holds **per `(scope, currency)`** — each event, and the general scope, independently sums to zero. Scopes never net against each other (isolated by design).
 
 ### Splitting an expense
 
@@ -469,7 +521,7 @@ This is a heuristic, not a true optimum: the provably-minimum transfer set is NP
 
 > **Flagged future optimization — the `n − k` decomposition (NOT implemented).** The exact minimum number of transfers is `n − k`, where `n` is the count of members with a nonzero balance and `k` is the largest number of **disjoint subgroups whose balances each net to zero**. Every such zero-sum subgroup settles entirely within itself (a group of size `s` needs `s − 1` transfers), so more independent subgroups means fewer transfers — greedy's worst case is the `k = 1` end (`n − 1`). The catch: finding the maximum `k` *is* the NP-complete core (the subset-sum wall itself, cf. "Optimal Account Balancing"), so this is **not a free win over greedy** — it's the hard problem, just named. It is, however, tractable at the `n` a Telegram chat actually has: for small groups a bounded subset-sum / backtracking search could compute the exact optimum if transfer counts ever look bloated in practice. Recorded here as a deliberate option, not a requirement — greedy already delivers the must-have (a valid, deterministic, reduced settlement). Any such optimizer must still obey **presentation-only**: compute at read time, write nothing to the ledger.
 
-**A per-group toggle, admin-only.** Simplification is controlled by `groups.simplify_debts`, flipped with `/simplify on|off`. Only a group **admin** may change it: on a set request the bot calls `getChatMember(chat_id, caller_id)` and proceeds only if the caller's status is `creator` or `administrator`; otherwise it refuses and leaves the setting untouched. (This is independent of the bot's *own* required admin rights — see Onboarding.) Reading the setting (`/simplify` with no argument, or `/group`) is open to any member. The setting defaults to **off**: a new group sees raw pairwise debts until an admin deliberately opts in, which is the least-surprising default for a money bot — with simplification on you may be asked to pay someone you never directly transacted with, and that should be a choice the group makes.
+**A per-group toggle, admin-only.** Simplification is controlled by `groups.simplify_debts`, flipped with `/simplify on|off`. Only a group **admin** may change it: on a set request the bot calls `getChatMember(chat_id, caller_id)` and proceeds only if the caller's status is `creator` or `administrator`; otherwise it refuses and leaves the setting untouched. (This is independent of the bot's *own* required admin rights — see Onboarding.) Reading the setting (`/simplify` with no argument, or `/group`) is open to any member. The setting defaults to **on**: simplification is purely presentational (the per-member balances are byte-for-byte identical either way — see below), so the default carries **no ledger risk** and immediately delivers the feature's value — the fewest transfers to settle up. The one cosmetic cost is that a suggested transfer may name someone you never directly transacted with; since that is advisory only and reversible with zero ledger impact, an admin who prefers raw pairwise debts can `/simplify off`.
 
 **The toggle is presentation-only; balances never move.** This is the design rule that makes flipping it safe any number of times. The single source of truth is the append-only ledger (expenses, expense_shares, settlements); every net balance is **derived** from that ledger on read (see "Deriving balances") and `simplify()` is a *pure function of those balances* that returns suggested transfers. Simplification therefore:
 
@@ -479,3 +531,46 @@ This is a heuristic, not a true optimum: the provably-minimum transfer set is NP
 Because the toggle touches no rows that feed the balance formula, toggling on → off → on → … leaves balances exactly where they were. There is **no "apply simplification" step** that nets the ledger down; that would be the one implementation that *could* corrupt balances on toggle, and it is deliberately excluded. The invariant to assert in tests: for any ledger and any sequence of `simplify_debts` flips, each member's derived balance equals what the toggle-free ledger derives — i.e. **equality against the never-toggled baseline** is the load-bearing assertion. Do **not** assert only "balances sum to zero": every settlement moves `+x`/`−x`, so the sum stays zero even when individual balances are wrong, which means a materialize-on-toggle bug can corrupt balances while still passing a sum-zero check. Sum-zero is a sanity check, never the proof of accuracy.
 
 **Acting on a suggestion is a normal settlement.** When a user runs `/settleup` after seeing a simplified suggestion (e.g. "A pays C 30"), that records an ordinary settlement event between the actual `from`/`to` users — a real transfer of obligation, no different from any other settlement. It is a genuine ledger fact, not a materialization of the simplification, so later toggling the setting off (and showing raw pairwise debts again) still yields correct, consistent balances. Suggestions are advisory; only `/settleup` moves money in the ledger.
+
+### Events (ad-hoc expense scopes)
+
+An **event** is an ad-hoc sub-scope within a group for tracking a bounded set of expenses separately — a weekend trip, a dinner series, a shared project — without spinning up a new Telegram group. It is the same pattern as the simplify toggle: **a scope dimension on the one append-only ledger, never a second ledger.** The whole schema change is the `events`/`event_members` tables, a nullable `event_id` on `expenses`/`settlements` (NULL = regular/general tracking), and `groups.active_event_id`. Everything else — `apportion`, `compute_shares`, the balance formula, `simplify()`, placeholders/claiming, voiding — works unchanged, just **parameterized by scope**.
+
+**Isolated scopes (not a filtered view).** Scopes do not net against each other. The general `/balance` derives over `event_id IS NULL` only and **excludes** event-tagged rows; each event derives over its own slice; each is settled independently. There is **no** automatic combined/grand-total balance across scopes in v1 (a deliberate Won't — see below). This is what "track the trip separately" means: the trip has its own tab you can settle and forget, without it touching the regular running tally.
+
+**Active-event mode (how expenses get tagged).** Tagging is implicit via a shared, durable **active event**, not a per-command token:
+
+- `/event new "<name>"` begins an event (create + open + make active), setting `groups.active_event_id`. While set, **`/addexpense` and `/settleup` auto-tag to it.** `/event pause` clears the pointer without closing (the event stays `open`); `/event resume` re-points at it.
+- **Writes are strictly active-scoped — there is no per-command override token.** To record a *general* expense while an event is active, `/event pause` first. The cost of this simplicity is a "sticky" active event, so **every scoped reply must echo the scope** ("✅ Added to *Bali Trip*: …") and `/group` surfaces the active event prominently — otherwise people mis-file expenses.
+- **Reads may cross scopes; writes may not.** `/balance` defaults to the active event's scope, but a scope can be *named* read-only (`/balance general`, `/balance "<event>"`) without ending the active one — reading another scope is harmless, mis-tagging a write is not.
+- **At most one event is open per group at a time** (a partial unique index, `uq_events_one_open_per_group`, enforces it). To begin a new event you must `/event close` the current one first — there is no switching between several open events. The active pointer therefore only ever references that single open event or is NULL (general / paused).
+- The active event lives in the **DB** (`groups.active_event_id`), **not aiogram FSM** — it is shared across all members and must survive restarts, whereas the FSM holds only per-conversation multi-step state (the `@all` confirm, the `/simplify` gate).
+
+**Explicit roster (who `@all` means).** An event carries its own `event_members` roster — a deliberate opt-in **subset** of the group (the trip attendees):
+
+- `@all` inside an active event splits across the **roster**, not the whole group.
+- **The group-level coverage check does not apply.** The `getChatMemberCount` block-until-confirmed gate exists because the bot can't enumerate the group; a roster is an intentional subset, so there is nothing to warn about. (Unclaimed placeholders on the roster are valid participants and never block.)
+- The roster grows **implicitly** (the creator on `/event new`; anyone named as a participant in an event expense joins) and **explicitly** (`/event add|remove @user`). It references `users.id`, so claiming a placeholder binds their event shares automatically, exactly as in the general scope.
+
+**Lifecycle is state-only — no materialization.** An event is `open` → `closed` (`/event close`), reversibly via `/event reopen` (allowed only when no other event is open, per the one-open rule); a closed event rejects new tagging. A group runs many events across its lifetime, but strictly **sequentially** — close the current one before opening the next. **Closing never rolls a trip's net debts into the general balance.** That would be a materialization — the same trap the simplify section forbids: it would have to be done as real settlement/transfer events, and silently doing so on close would corrupt the "balances are derived" contract. Settling a trip is just normal `/settleup`s tagged to that event; folding a trip into the general tab, if ever wanted, is future work via *explicit recorded transfers*, never a mutate-on-close.
+
+**Currency.** `events.default_currency` is nullable and falls back to `groups.default_currency`. Per-`(scope, currency)` balances still hold, so a trip can default to a foreign currency while the group stays on its own.
+
+**Simplify & `/group`.** `/balance` within a scope honors the group's `simplify_debts` setting against that scope's balances (a per-event toggle is a Could-have, not v1). `/group` gains the active event (if any), the list of open events, and per-event activity in its summary.
+
+**Invariants to assert in tests (extends "Deriving balances" and "Debt simplification"):**
+
+- **Per-scope sum-zero:** every `(event, currency)` and the general scope each independently sum to zero.
+- **Isolation:** the general balance equals the balance computed while ignoring all event-tagged rows; an event's balance equals the balance over only its rows. Toggling/closing an event never moves a balance in another scope.
+- **Equality vs. the never-toggled baseline** for simplify holds *per scope*.
+
+**Service-core & DTO impact.** `AddExpenseCommand` and `SettleUpCommand` gain an optional `event_id: UUID | None`; the **bot** resolves the active event from group state and populates it — the core stays Telegram-agnostic and just records the tag. New command DTOs `CreateEventCommand` (new), `SetActiveEventCommand` (pause/resume — points the pointer at the open event or NULL), `SetEventStatusCommand` (close/reopen), and `EditEventRosterCommand`, a result `EventCreatedResult`, and a read-side `EventSummary` follow the existing conventions (frozen, money as int cents, IDs UUID7). All SQL stays in the service core; one transaction per command, unchanged.
+
+**Command-grammar note (open).** `/balance all` already means *all members*; adding a scope axis needs disambiguation so `all` (the member axis) and a scope name don't collide — e.g. `/balance [<scope>] [all]`. The token syntax is a parsing task, deferred to implementation.
+
+**MoSCoW for events.**
+
+- *Must-have*: create/open an event (**one open at a time** — sequential lifecycle); active-event mode + auto-tag; `/event pause` / `resume` (log a general expense mid-event); `/event close` (finish, freeing the slot for the next event); explicit roster + event `@all`; event-scoped `/balance` and `/settleup`; per-`(scope, currency)` reconciliation; scope echoed in every reply.
+- *Should-have*: `/event reopen` a closed event; per-event default currency; `/event list` and `/event` info; `/group` surfacing the active/open event.
+- *Could-have*: per-event `simplify` toggle (else inherit the group); closed-event summary/export; a combined "all scopes" balance view; `event_members` leave/rejoin history.
+- *Won't-have (v1)*: cross-event netting / roll-up of a closed event into general (the materialization trap — settling a trip is just normal scoped `/settleup`s); events spanning multiple Telegram groups.

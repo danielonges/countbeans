@@ -74,12 +74,12 @@ async def test_user_telegram_user_id_unique(session: AsyncSession) -> None:
 
 # --- Group ---
 
-async def test_group_simplify_debts_defaults_false(session: AsyncSession) -> None:
+async def test_group_simplify_debts_defaults_true(session: AsyncSession) -> None:
     group = _group()
     session.add(group)
     await session.flush()
     await session.refresh(group)
-    assert group.simplify_debts is False
+    assert group.simplify_debts is True
 
 
 async def test_group_currency_check_rejects_short(session: AsyncSession) -> None:
