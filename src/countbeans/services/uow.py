@@ -1,7 +1,13 @@
 """Caller-managed Unit of Work."""
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .repositories import GroupRepository, SettlementRepository, UserRepository
+from .repositories import (
+    ExpenseRepository,
+    GroupMemberRepository,
+    GroupRepository,
+    SettlementRepository,
+    UserRepository,
+)
 
 
 class UnitOfWork:
@@ -13,8 +19,10 @@ class UnitOfWork:
         self._session = self._session_factory()
         await self._session.__aenter__()
         self.settlements = SettlementRepository(self._session)
+        self.expenses = ExpenseRepository(self._session)
         self.users = UserRepository(self._session)
         self.groups = GroupRepository(self._session)
+        self.group_members = GroupMemberRepository(self._session)
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

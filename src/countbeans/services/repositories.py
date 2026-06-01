@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Group, Settlement, User
+from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
 from countbeans.dto.results import SettlementCreatedResult
 
 
@@ -33,6 +33,20 @@ class SettlementRepository:
             currency=row.currency,
             event_id=None,
         )
+
+
+class ExpenseRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, expense: Expense, shares: dict[uuid.UUID, int]) -> None:
+        self._session.add(expense)
+        await self._session.flush()
+        self._session.add_all([
+            ExpenseShare(expense_id=expense.id, user_id=uid, share_cents=cents)
+            for uid, cents in shares.items()
+        ])
+        await self._session.flush()
 
 
 class UserRepository:
@@ -97,3 +111,20 @@ class GroupRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
+
+
+class GroupMemberRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def ensure_member(self, group_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        result = await self._session.execute(
+            select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == user_id,
+                GroupMember.left_at.is_(None),
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            self._session.add(GroupMember(group_id=group_id, user_id=user_id))
+            await self._session.flush()
