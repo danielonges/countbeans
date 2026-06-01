@@ -91,17 +91,44 @@ These cut across the whole data model and are the reason the schema below differ
 - **Expense manager** — validates and records expenses and settlements as ledger events, and computes derived balances (and, optionally, a simplified set of transfers).
 - **Database** — persists users, group membership, and the immutable ledger of expenses, expense shares, and settlements.
 
+### Onboarding & membership
+
+**Platform constraint:** a Bot-API bot cannot enumerate a group's members at any permission level — there is no roster API. The bot only learns a user exists when that user *interacts* with it, or when it is named in a command. This shapes the whole onboarding model.
+
+**Implicit self-onboarding.** There is no explicit join ceremony. The first time a user issues any command, the bot upserts them into `users` and `group_members`, capturing `telegram_user_id`, `username`, and names from the update's `from` field. Interaction doubles as consent to be tracked in a financial ledger.
+
+**Mentioned-but-unseen participants (placeholders).** A split may name someone (`@bob`) the bot has never seen, and the Bot API cannot reliably resolve a bare `@username` to a user ID. So a mention of an unknown handle creates a **pending placeholder** — a `users` row with `telegram_user_id IS NULL`, known only by its `username`. When that person later interacts, the bot has their real Telegram ID and **claims** the placeholder by setting `telegram_user_id` on that same row. Because every table references the surrogate `users.id`, all their existing shares and settlements bind to the now-real identity automatically — claiming is a single-row `UPDATE`, no fan-out rewrite.
+
+**The bot requires admin rights.** Admin status does *not* unlock a member roster — enumeration is impossible at every permission level, so the core onboarding model (implicit self-onboarding + placeholders) is unchanged. What admin buys is **accurate membership going forward** and freeform input:
+
+- It always receives `my_chat_member` (added/removed/promoted), so it can detect its own status, create the `groups` row, and post a welcome.
+- As an admin it receives the rich `chat_member` join/leave/ban stream (opt in via `allowed_updates`), so `group_members` can be kept **accurate from the event stream** — set a row on join, set `left_at` on leave — rather than drifting.
+- Privacy mode is off for admin bots: the bot sees all group messages, not just commands/replies/@mentions. This enables freeform expense parsing later, but note the privacy implication — a financial bot now sees all chatter.
+
+**Enforcement.** On `my_chat_member` (and by checking `getChatMember` for the bot itself), if the bot is not an administrator it posts a message asking to be promoted and **refuses to process commands until it is**. This is the trade for accuracy: a heavier, scarier install for a money bot, accepted deliberately.
+
+**Membership at split time.** With the `chat_member` stream maintaining `group_members`, "split evenly among everyone" can trust it. A `getChatMember` check at split time remains cheap insurance against missed events, but is no longer load-bearing.
+
+**Why a surrogate key (not the Telegram ID).** The Telegram user ID is the only stable, unique, permanent identifier — usernames are optional, mutable, and reusable, so keying on them would silently split or merge identities on rename/reuse (a money bug) and couldn't represent username-less users at all. But placeholders have *no* Telegram ID yet. The surrogate `users.id` squares this: it's the uniform key everything references, while `telegram_user_id` starts NULL (pending) and is filled in on claim. Treat `username` strictly as a display alias and placeholder match hint, never as identity.
+
 ### Schema (PostgreSQL)
 
 There is intentionally **no `debts` table** — balances are derived (see below). Edits/deletes are done by setting `voided_at`, not by mutating rows.
 
 ```sql
--- Telegram users seen by the bot
+-- Identities. Surrogate `id` is the stable key everything references, so a
+-- placeholder can be "claimed" later by just filling in telegram_user_id —
+-- no foreign keys need rewriting.
+--   * telegram_user_id IS NULL  -> pending placeholder (known only by @username)
+--   * telegram_user_id IS NOT NULL -> claimed; this is the trustworthy identity
+-- username is a mutable display alias and a match hint, never an identity.
+-- App invariant: at most one pending placeholder per username.
 CREATE TABLE users (
-  user_id     BIGINT PRIMARY KEY,
-  username    VARCHAR(255),                -- @handle (mutable on Telegram; not a key)
-  first_name  VARCHAR(255),
-  last_name   VARCHAR(255)
+  id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  telegram_user_id  BIGINT UNIQUE,           -- NULL until the placeholder is claimed
+  username          VARCHAR(255),
+  first_name        VARCHAR(255),
+  last_name         VARCHAR(255)
 );
 
 -- Telegram groups the bot is in
@@ -117,7 +144,7 @@ CREATE TABLE groups (
 -- represented as a new membership period without losing history.
 CREATE TABLE group_members (
   group_id   BIGINT NOT NULL REFERENCES groups(group_id),
-  user_id    BIGINT NOT NULL REFERENCES users(user_id),
+  user_id    BIGINT NOT NULL REFERENCES users(id),
   joined_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   left_at    TIMESTAMP WITH TIME ZONE,    -- NULL = still a member
   PRIMARY KEY (group_id, user_id, joined_at)
@@ -127,20 +154,20 @@ CREATE TABLE group_members (
 CREATE TABLE expenses (
   expense_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   group_id      BIGINT NOT NULL REFERENCES groups(group_id),
-  payer_id      BIGINT NOT NULL REFERENCES users(user_id),
+  payer_id      BIGINT NOT NULL REFERENCES users(id),
   amount_cents  BIGINT NOT NULL CHECK (amount_cents > 0),   -- integer minor units
   currency      CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
   description   VARCHAR(255),
-  created_by    BIGINT NOT NULL REFERENCES users(user_id),
+  created_by    BIGINT NOT NULL REFERENCES users(id),
   created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   voided_at     TIMESTAMP WITH TIME ZONE,                   -- NULL = active
-  voided_by     BIGINT REFERENCES users(user_id)
+  voided_by     BIGINT REFERENCES users(id)
 );
 
 -- Per-participant shares; MUST sum to expenses.amount_cents (enforced in app)
 CREATE TABLE expense_shares (
   expense_id   BIGINT NOT NULL REFERENCES expenses(expense_id),
-  user_id      BIGINT NOT NULL REFERENCES users(user_id),
+  user_id      BIGINT NOT NULL REFERENCES users(id),
   share_cents  BIGINT NOT NULL CHECK (share_cents >= 0),
   PRIMARY KEY (expense_id, user_id)
 );
@@ -149,8 +176,8 @@ CREATE TABLE expense_shares (
 CREATE TABLE settlements (
   settlement_id  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   group_id       BIGINT NOT NULL REFERENCES groups(group_id),
-  from_user_id   BIGINT NOT NULL REFERENCES users(user_id),  -- pays
-  to_user_id     BIGINT NOT NULL REFERENCES users(user_id),  -- receives
+  from_user_id   BIGINT NOT NULL REFERENCES users(id),  -- pays
+  to_user_id     BIGINT NOT NULL REFERENCES users(id),  -- receives
   amount_cents   BIGINT NOT NULL CHECK (amount_cents > 0),
   currency       CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
   created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
