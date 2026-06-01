@@ -12,7 +12,7 @@ countbeans is a Telegram bot for tracking and splitting shared expenses within T
 # Install dependencies
 uv sync
 
-# Run the bot
+# Run the bot (local, no Docker)
 uv run countbeans
 
 # Run tests
@@ -20,6 +20,22 @@ uv run pytest
 
 # Run a single test
 uv run pytest tests/path/to/test_file.py::test_name
+```
+
+**Docker (recommended for running with a real database):**
+
+```bash
+# Build image and start bot + postgres
+docker compose up --build
+
+# Start without rebuilding (after first run)
+docker compose up
+
+# Stop and remove containers (data volume is preserved)
+docker compose down
+
+# Wipe everything including the database volume
+docker compose down -v
 ```
 
 ## Architecture
@@ -100,8 +116,9 @@ All config lives in `src/countbeans/config/core.py` using `pydantic-settings`. E
 | `COUNTBEANS_API_ID` | `int` | Telegram API ID |
 | `COUNTBEANS_API_HASH` | `str` | Telegram API hash |
 | `COUNTBEANS_BOT_TOKEN` | `str` | Telegram bot token |
+| `COUNTBEANS_DATABASE_URL` | `str` | SQLAlchemy async DSN, e.g. `postgresql+asyncpg://user:pass@host:5432/db` |
 
-All fields are required — the app will raise a `ValidationError` at startup if any are missing. Use a `.env` file at the project root.
+All fields are required — the app will raise a `ValidationError` at startup if any are missing. Use a `.env` file at the project root. When running via Docker Compose, `COUNTBEANS_DATABASE_URL` is injected automatically by `compose.yml`; the other three must be present in `.env`.
 
 ## Product Spec
 

@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: countbeans
+      POSTGRES_USER: countbeans
+      POSTGRES_PASSWORD: countbeans
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U countbeans"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      COUNTBEANS_DATABASE_URL: postgresql+asyncpg://countbeans:countbeans@db:5432/countbeans
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:
