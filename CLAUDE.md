@@ -63,12 +63,29 @@ All layers share the config in `src/countbeans/config/` for settings (see below)
 **Database sessions — caller-managed Unit of Work.** There is no DI framework (no FastAPI `Depends`); session lifecycle is handled explicitly via a **caller-managed Unit of Work**. The session is *passed into* service functions, not opened by them — the transaction boundary lives one level above the operation, which is what enables atomic multi-op composition and rollback-per-test.
 
 - **The service core defines a `UnitOfWork`** — an async context manager that wraps the `async_sessionmaker`, opens one `AsyncSession` + transaction, exposes the repositories (`uow.expenses`, `uow.users`, …), and **commits on clean exit / rolls back on exception**. It is the *only* type holding SQLAlchemy objects and exposes none of them, so callers never import `AsyncSession`/`select`.
-- **Service / use-case functions take the `UnitOfWork` explicitly** as their first argument and **never commit** — they only do work and return DTOs (`async def add_expense(uow, cmd) -> ExpenseDTO`). Commit/rollback is owned by whoever opened the UoW. This is the rule that makes several ops compose into one atomic transaction and lets tests roll back.
+- **Service / use-case functions take the `UnitOfWork` explicitly** as their first argument and **never commit** — they only do work and return DTOs (`async def add_expense(uow, cmd) -> ExpenseCreatedResult`). Commit/rollback is owned by whoever opened the UoW. This is the rule that makes several ops compose into one atomic transaction and lets tests roll back.
 - **Composition root** (`main.py`): build the engine and `async_sessionmaker(engine, expire_on_commit=False)` **once** at startup, wrap them in a `uow_factory` (a callable returning a fresh `UnitOfWork`), hand that factory to the bot via aiogram's DI (`dp["uow_factory"] = …`), and `await engine.dispose()` on shutdown.
 - **The thin transactional wrapper at the call site is an aiogram middleware**: it opens one UoW per update, puts it in `data["uow"]`, and commits / rolls back around the handler — so **one transaction per command** falls out of the middleware boundary and handlers never write `async with`. The handler receives `uow` and passes it **explicitly** into service calls (`await add_expense(data["uow"], cmd)`). (A `@transactional` decorator over a service facade is an equivalent wrapper if per-handler control is preferred.)
 - **Tests** construct a `UnitOfWork` over a transaction and roll it back at the end — service functions run with no commits, fully isolated and fast, with no aiogram or running bot in the loop.
 
 The deliberate trade vs. each service method opening its own session: the boundary sits in the wrapper (middleware/test), *above* the operation, so the bot adapter **demarcates** the transaction (through the `UnitOfWork` abstraction, never raw SQLAlchemy) even though all SQL stays in the core. The two-phase `@all` flow is, correctly, **two** commands → two UoWs → two transactions: read the `known` count, FSM-confirm, then record.
+
+**Pydantic DTOs — shared vocabulary in `countbeans.dto`.** The service core accepts and returns plain Pydantic models — never `aiogram` types, never SQLAlchemy ORM rows, never raw dicts. These live in a dedicated **`src/countbeans/dto/`** package so both the bot layer and the service core can import them without either depending on the other's internals. Three sub-modules:
+
+- **`dto/commands.py` — inbound to the service core.** One class per mutating operation, carrying everything the core needs, with no Telegram types: `AddExpenseCommand`, `SettleUpCommand`, `OnboardUserCommand`. The bot parses the raw Telegram message and constructs one of these — the handoff point between layers.
+- **`dto/results.py` — outbound from the service core after a write.** Confirmations returned to the bot for reply formatting: `ExpenseCreatedResult`, `SettlementCreatedResult`. Carry only what the bot needs to format a reply (IDs, computed cents, participant list) — not full ledger rows.
+- **`dto/domain.py` — read-side representations.** Derived views returned by queries: `MemberBalance`, `Transfer`, `GroupSummary`. Used by `/balance` and `/group` responses. `Transfer` is what `simplify()` returns: `(debtor_id, creditor_id, amount_cents)`.
+
+**Conventions that apply to every DTO:**
+
+- `model_config = ConfigDict(frozen=True)` on every class — DTOs are immutable by construction, preventing accidental mutation after the service returns them and enabling use as dict keys.
+- **Money fields are always `int` (cents), never `float` or `Decimal`.** The spec rule ("integer minor units, never float") is enforced by the type. Formatting to a display string (e.g. `"$12.50"`) happens in the bot layer, never in a DTO.
+- **IDs are `uuid.UUID`.** The bot never constructs raw UUID strings — UUIDs are generated in the service core via `uuid_utils.uuid7()` and surfaced to the bot as typed fields.
+- **Currency is `str` (ISO 4217, 3 chars).** No currency enum for now — a plain `str` keeps the DTO portable and avoids the overhead of a registry for a single default currency.
+- **No `from_attributes=True`.** DTOs are **not** built directly from ORM rows via `model_validate(row)` — that would tie DTO field names to ORM attribute names. Instead, each repository method maps rows to DTOs explicitly (`_to_dto(row) -> SomeResult`). The ORM schema can evolve without the DTO shape changing, and the boundary stays airtight.
+- **Validation at construction.** Pydantic validators on commands enforce the same rules as the prose spec: `amount_cents > 0`, `from_user_id != to_user_id` on `SettleUpCommand`, non-empty `participants`. This gives one deterministic place where bad input is rejected — before it ever reaches a service function.
+
+**Dependency direction:** `countbeans.dto` has no imports from `services`, `main`, or `aiogram` — it is a leaf package. `services` imports from `dto`; the bot layer imports from `dto`; neither imports from the other.
 
 ## Commits
 
