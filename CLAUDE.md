@@ -60,6 +60,7 @@ These cut across the whole data model and are the reason the schema below differ
 - **Money is integer minor units (cents), never `float`.** Float arithmetic accumulates rounding error across a ledger. Store and compute in `BIGINT` cents; format to a decimal string only at display time.
 - **Append-only ledger; balances are derived, never stored.** Expenses and settlements are immutable events. There is no `debts` table — a user's balance is computed by summing the ledger on read. This eliminates read-modify-write races, keeps a full audit trail, and means edits/deletes are done by *voiding* an event and re-adding, not mutating in place.
 - **Every expense reconciles.** Per expense, the participant shares sum *exactly* to the expense amount. Even splits distribute leftover cents deterministically (see the algorithm), so the books always balance and the sum of all member balances in a group is zero.
+- **Surrogate PKs are UUID7, generated in the app layer.** UUID7 is time-ordered so B-tree indexes stay sequential (no fragmentation), IDs are non-enumerable (no `id=1,2,3` scraping), and there is no collision risk if data is ever merged across instances. Use `uuid_utils.uuid7()` (Rust-backed). `groups.group_id` and `users.telegram_user_id` are Telegram-assigned `BIGINT`s and stay that way.
 - **Currency is explicit per event.** Each expense and settlement carries an ISO-4217 code. Balances are computed per currency; cross-currency netting requires an FX policy and is out of scope for now.
 
 ### Requirements
@@ -124,7 +125,7 @@ There is intentionally **no `debts` table** — balances are derived (see below)
 -- username is a mutable display alias and a match hint, never an identity.
 -- App invariant: at most one pending placeholder per username.
 CREATE TABLE users (
-  id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id                UUID PRIMARY KEY,        -- UUID7, generated in app layer
   telegram_user_id  BIGINT UNIQUE,           -- NULL until the placeholder is claimed
   username          VARCHAR(255),
   first_name        VARCHAR(255),
@@ -144,7 +145,7 @@ CREATE TABLE groups (
 -- represented as a new membership period without losing history.
 CREATE TABLE group_members (
   group_id   BIGINT NOT NULL REFERENCES groups(group_id),
-  user_id    BIGINT NOT NULL REFERENCES users(id),
+  user_id    UUID NOT NULL REFERENCES users(id),
   joined_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   left_at    TIMESTAMP WITH TIME ZONE,    -- NULL = still a member
   PRIMARY KEY (group_id, user_id, joined_at)
@@ -152,32 +153,32 @@ CREATE TABLE group_members (
 
 -- Immutable expense events; soft-deleted via voided_at
 CREATE TABLE expenses (
-  expense_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  expense_id    UUID PRIMARY KEY,            -- UUID7, generated in app layer
   group_id      BIGINT NOT NULL REFERENCES groups(group_id),
-  payer_id      BIGINT NOT NULL REFERENCES users(id),
+  payer_id      UUID NOT NULL REFERENCES users(id),
   amount_cents  BIGINT NOT NULL CHECK (amount_cents > 0),   -- integer minor units
   currency      CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
   description   VARCHAR(255),
-  created_by    BIGINT NOT NULL REFERENCES users(id),
+  created_by    UUID NOT NULL REFERENCES users(id),
   created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   voided_at     TIMESTAMP WITH TIME ZONE,                   -- NULL = active
-  voided_by     BIGINT REFERENCES users(id)
+  voided_by     UUID REFERENCES users(id)
 );
 
 -- Per-participant shares; MUST sum to expenses.amount_cents (enforced in app)
 CREATE TABLE expense_shares (
-  expense_id   BIGINT NOT NULL REFERENCES expenses(expense_id),
-  user_id      BIGINT NOT NULL REFERENCES users(id),
+  expense_id   UUID NOT NULL REFERENCES expenses(expense_id),
+  user_id      UUID NOT NULL REFERENCES users(id),
   share_cents  BIGINT NOT NULL CHECK (share_cents >= 0),
   PRIMARY KEY (expense_id, user_id)
 );
 
 -- Settlement payments (cash or digital); also immutable events
 CREATE TABLE settlements (
-  settlement_id  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  settlement_id  UUID PRIMARY KEY,           -- UUID7, generated in app layer
   group_id       BIGINT NOT NULL REFERENCES groups(group_id),
-  from_user_id   BIGINT NOT NULL REFERENCES users(id),  -- pays
-  to_user_id     BIGINT NOT NULL REFERENCES users(id),  -- receives
+  from_user_id   UUID NOT NULL REFERENCES users(id),    -- pays
+  to_user_id     UUID NOT NULL REFERENCES users(id),    -- receives
   amount_cents   BIGINT NOT NULL CHECK (amount_cents > 0),
   currency       CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
   created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
