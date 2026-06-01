@@ -74,17 +74,18 @@ These cut across the whole data model and are the reason the schema below differ
 
 **MoSCoW prioritization**
 
-- *Must-have*: group expense tracking; basic expense input and derived balances; persistent storage; per-user **and whole-group** balance summaries; settling up (full **or partial** payments).
-- *Should-have*: uneven splits (exact amounts, percentages, weights) and selecting a subset of the group; debt simplification (minimal set of transfers to settle a group); multi-currency support.
+- *Must-have*: group expense tracking; basic expense input and derived balances; persistent storage; per-user **and whole-group** balance summaries; settling up (full **or partial** payments); **debt simplification (a reduced set of transfers to settle a group), as a per-group setting an admin can toggle on or off**.
+- *Should-have*: uneven splits (exact amounts, percentages, weights) and selecting a subset of the group; multi-currency support.
 - *Could-have*: expense categories; notifications for outstanding debts; multiple payers per expense; a group info command surfacing membership, coverage gap, and activity.
 - *Won't-have*: any web or mobile interface outside Telegram.
 
 ### Key commands
 
 - `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
-- `/balance [all]` — `/balance` shows the caller's own net position with other members; `/balance all` shows **every member's** net balance (per currency) plus the suggested settle-up transfers from debt simplification. Both are derived from the ledger.
+- `/balance [all]` — `/balance` shows the caller's own net position with other members; `/balance all` shows **every member's** net balance (per currency) plus the suggested settle-up transfers. Both are derived from the ledger. The suggested transfers honor the group's **debt-simplification setting**: when on, they are the simplified (reduced) set; when off, they are the raw pairwise debts. The per-member net balances are identical either way — the toggle only changes how the *suggested transfers* are presented.
 - `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`.
-- `/group` — show group info: name and default currency; the **known members** the bot can split among, with pending placeholders flagged separately (mentioned but not yet `/start`-ed); the **coverage gap** (`known` vs `getChatMemberCount`) so people can see who still needs to join; and a quick activity summary (active expenses and total tracked, per currency).
+- `/simplify [on|off]` — view or change the group's debt-simplification setting. `/simplify` with no argument reports the current state (any member). `/simplify on` / `/simplify off` flips it and is **admin-only**: the bot checks the caller via `getChatMember` and refuses (no state change) unless their status is `creator` or `administrator`. The setting is purely presentational — see "Debt simplification".
+- `/group` — show group info: name, default currency, and the **debt-simplification setting** (on/off); the **known members** the bot can split among, with pending placeholders flagged separately (mentioned but not yet `/start`-ed); the **coverage gap** (`known` vs `getChatMemberCount`) so people can see who still needs to join; and a quick activity summary (active expenses and total tracked, per currency).
 
 ### Components
 
@@ -139,6 +140,10 @@ CREATE TABLE groups (
   telegram_chat_id  BIGINT UNIQUE NOT NULL, -- Telegram chat ID
   group_name        VARCHAR(255),
   default_currency  CHAR(3) NOT NULL DEFAULT 'USD',   -- ISO 4217
+  -- Debt-simplification toggle (admin-only via /simplify). Purely a display
+  -- preference: it changes how /balance all *suggests* transfers, never the
+  -- ledger or derived balances, so flipping it any number of times is safe.
+  simplify_debts    BOOLEAN NOT NULL DEFAULT FALSE,
   CHECK (LENGTH(default_currency) = 3)
 );
 
@@ -313,15 +318,19 @@ actual = getChatMemberCount() - 1          # minus the bot itself
 - `known == actual` → the bot demonstrably knows everyone; record the expense.
 - `known <  actual` → there are members the bot has never seen and **cannot name**. **Do not record.** Reply with who *would* be included and the gap ("splitting among these 3; this group has 5 — 2 I haven't seen yet"), and require the payer to either confirm "just these people" or have the missing members `/start` first. The only way to actually include an unseen member is for them to interact — there is no API to pull them in (admin's `chat_member` stream captures *future* joiners, never pre-existing silent ones).
 
-### Debt simplification (should-have)
+### Debt simplification (must-have, per-group toggle)
 
 Given net balances (which sum to zero), produce a minimal-ish set of transfers by repeatedly matching the largest debtor with the largest creditor:
 
 ```python
-def simplify(balances: dict[int, int]) -> list[tuple[int, int, int]]:
-    """Return (debtor, creditor, cents) transfers that settle the group."""
-    debtors   = sorted([u, -b] for u, b in balances.items() if b < 0)
-    creditors = sorted([u,  b] for u, b in balances.items() if b > 0)
+def simplify(balances: dict[Id, int]) -> list[tuple[Id, Id, int]]:
+    """Return (debtor, creditor, cents) transfers that settle the group.
+    Sort by amount descending (largest debtor vs largest creditor) so the
+    transfer count stays low; tie-break by id to keep the output deterministic.
+    NB: sort by amount, not id — plain sorted() orders by id first and inflates
+    the transfer count, defeating the point of simplification."""
+    debtors   = sorted(([u, -b] for u, b in balances.items() if b < 0), key=lambda x: (-x[1], x[0]))
+    creditors = sorted(([u,  b] for u, b in balances.items() if b > 0), key=lambda x: (-x[1], x[0]))
     transfers, i, j = [], 0, 0
     while i < len(debtors) and j < len(creditors):
         pay = min(debtors[i][1], creditors[j][1])
@@ -334,3 +343,18 @@ def simplify(balances: dict[int, int]) -> list[tuple[int, int, int]]:
             j += 1
     return transfers
 ```
+
+This is a heuristic, not a true optimum: the provably-minimum transfer set is NP-complete (it reduces from subset-sum). Largest-debtor-vs-largest-creditor greedy gets a good, deterministic reduction cheaply, which is the right trade here — hence "minimal-ish," never "minimal." Even Splitwise's own "simplify debts" is a knowingly-suboptimal greedy of this kind (see https://antoncao.me/blog/splitwise), so matching that bar is the deliberate choice, not a shortcut. Whatever it returns is always a *valid* settlement (every balance zeroes out), because balances sum to zero and each transfer clears at least one side.
+
+> **Flagged future optimization — the `n − k` decomposition (NOT implemented).** The exact minimum number of transfers is `n − k`, where `n` is the count of members with a nonzero balance and `k` is the largest number of **disjoint subgroups whose balances each net to zero**. Every such zero-sum subgroup settles entirely within itself (a group of size `s` needs `s − 1` transfers), so more independent subgroups means fewer transfers — greedy's worst case is the `k = 1` end (`n − 1`). The catch: finding the maximum `k` *is* the NP-complete core (the subset-sum wall itself, cf. "Optimal Account Balancing"), so this is **not a free win over greedy** — it's the hard problem, just named. It is, however, tractable at the `n` a Telegram chat actually has: for small groups a bounded subset-sum / backtracking search could compute the exact optimum if transfer counts ever look bloated in practice. Recorded here as a deliberate option, not a requirement — greedy already delivers the must-have (a valid, deterministic, reduced settlement). Any such optimizer must still obey **presentation-only**: compute at read time, write nothing to the ledger.
+
+**A per-group toggle, admin-only.** Simplification is controlled by `groups.simplify_debts`, flipped with `/simplify on|off`. Only a group **admin** may change it: on a set request the bot calls `getChatMember(chat_id, caller_id)` and proceeds only if the caller's status is `creator` or `administrator`; otherwise it refuses and leaves the setting untouched. (This is independent of the bot's *own* required admin rights — see Onboarding.) Reading the setting (`/simplify` with no argument, or `/group`) is open to any member. The setting defaults to **off**: a new group sees raw pairwise debts until an admin deliberately opts in, which is the least-surprising default for a money bot — with simplification on you may be asked to pay someone you never directly transacted with, and that should be a choice the group makes.
+
+**The toggle is presentation-only; balances never move.** This is the design rule that makes flipping it safe any number of times. The single source of truth is the append-only ledger (expenses, expense_shares, settlements); every net balance is **derived** from that ledger on read (see "Deriving balances") and `simplify()` is a *pure function of those balances* that returns suggested transfers. Simplification therefore:
+
+- **writes nothing** — it never inserts settlements, never voids or mutates anything, never persists its output. It runs at read time for `/balance all` and is thrown away.
+- **changes only the suggested-transfer view** — `simplify_debts = true` renders the reduced transfer set; `false` renders the raw pairwise debts. The per-member net balances `/balance all` prints are computed straight from the ledger and are byte-for-byte identical under either setting.
+
+Because the toggle touches no rows that feed the balance formula, toggling on → off → on → … leaves balances exactly where they were. There is **no "apply simplification" step** that nets the ledger down; that would be the one implementation that *could* corrupt balances on toggle, and it is deliberately excluded. The invariant to assert in tests: for any ledger and any sequence of `simplify_debts` flips, each member's derived balance equals what the toggle-free ledger derives — i.e. **equality against the never-toggled baseline** is the load-bearing assertion. Do **not** assert only "balances sum to zero": every settlement moves `+x`/`−x`, so the sum stays zero even when individual balances are wrong, which means a materialize-on-toggle bug can corrupt balances while still passing a sum-zero check. Sum-zero is a sanity check, never the proof of accuracy.
+
+**Acting on a suggestion is a normal settlement.** When a user runs `/settleup` after seeing a simplified suggestion (e.g. "A pays C 30"), that records an ordinary settlement event between the actual `from`/`to` users — a real transfer of obligation, no different from any other settlement. It is a genuine ledger fact, not a materialization of the simplification, so later toggling the setting off (and showing raw pairwise debts again) still yields correct, consistent balances. Suggestions are advisory; only `/settleup` moves money in the ledger.
