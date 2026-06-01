@@ -75,13 +75,13 @@ These cut across the whole data model and are the reason the schema below differ
 **MoSCoW prioritization**
 
 - *Must-have*: group expense tracking; basic expense input and derived balances; persistent storage; per-user balance summaries; settling up (full **or partial** payments).
-- *Should-have*: unequal/custom splits; debt simplification (minimal set of transfers to settle a group); multi-currency support.
+- *Should-have*: uneven splits (exact amounts, percentages, weights) and selecting a subset of the group; debt simplification (minimal set of transfers to settle a group); multi-currency support.
 - *Could-have*: expense categories; notifications for outstanding debts; multiple payers per expense.
 - *Won't-have*: any web or mobile interface outside Telegram.
 
 ### Key commands
 
-- `/addexpense` — add an expense, e.g. `/addexpense 50 "Dinner" @user1 @user2`. Custom shares: `/addexpense 50 "Dinner" @user1:30 @user2:20`.
+- `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2` weight (see "Splitting an expense").
 - `/balance` — show the caller's net balance with other group members (derived from the ledger).
 - `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`.
 
@@ -202,29 +202,67 @@ Because shares always sum to the expense amount, the balances of all members in 
 
 ### Splitting an expense
 
-Even splits must reconcile to the cent. Compute a base share and distribute the leftover cents one-per-participant in a deterministic order:
+A split is two independent choices: **who** is in it (participant selection) and **how** the amount is divided among them (split mode). The only universal rule is that **shares sum exactly to `amount_cents`**. None of this touches the schema — every mode just writes `expense_shares` rows, and a non-participant simply has no row.
+
+**Participant selection** — splitting with only some of the group:
+
+- **Named subset (default):** `/addexpense 50 Dinner @a @b` splits among the named users **plus the payer**. This is how you split with only selected people — only those listed (and the payer) get a share.
+- **Everyone:** with no mentions (or an `@all` keyword), split across all current members from `group_members`, validated at split time via `getChatMember` (see Onboarding).
+- **Excluding the payer:** the payer is included by default; excluding them (they paid but didn't partake) just drops their share, leaving them owed the full amount.
+
+**Split modes** — dividing the amount unevenly:
+
+| Mode | Command example | Rule |
+|---|---|---|
+| Equal | `/addexpense 60 Dinner @a @b` | even split across participants |
+| Exact | `/addexpense 50 Dinner @a:30 @b:20` | per-person cents; must sum to the amount |
+| Percentage | `/addexpense 50 Dinner @a:60% @b:40%` | percentages must sum to 100 |
+| Weighted | `/addexpense 50 Dinner @a:2 @b:1` | split in proportion to integer weights |
+
+Equal, percentage, and weighted splits are the *same* operation — apportion the amount in proportion to integer weights — using the **largest-remainder method** so the cents always reconcile. Exact mode skips apportionment and takes the given cents after validating their sum.
 
 ```python
-def even_shares(amount_cents: int, participants: list[int]) -> dict[int, int]:
-    """Split amount_cents across participants so the shares sum exactly to amount_cents."""
-    base, remainder = divmod(amount_cents, len(participants))
-    ordered = sorted(participants)  # deterministic remainder allocation
-    return {u: base + (1 if i < remainder else 0) for i, u in enumerate(ordered)}
+def apportion(amount_cents: int, weights: dict[Id, int]) -> dict[Id, int]:
+    """Split amount_cents in proportion to integer weights, summing exactly to
+    amount_cents (largest-remainder method)."""
+    total = sum(weights.values())
+    if total <= 0:
+        raise ValueError("weights must sum to a positive value")
+    shares, remainders, allocated = {}, [], 0
+    for k, w in weights.items():
+        exact = amount_cents * w
+        shares[k] = exact // total           # floor
+        allocated += shares[k]
+        remainders.append((exact % total, k))
+    # hand the leftover cents to the largest remainders (deterministic tie-break by id)
+    remainders.sort(key=lambda r: (-r[0], r[1]))
+    for _, k in remainders[: amount_cents - allocated]:
+        shares[k] += 1
+    return shares
+
+
+def compute_shares(amount_cents, participants, mode="equal", params=None):
+    match mode:
+        case "equal":
+            return apportion(amount_cents, {u: 1 for u in participants})
+        case "weighted":                         # params: {id: weight}
+            return apportion(amount_cents, params)
+        case "percent":                          # params: {id: percent}
+            if sum(params.values()) != 100:
+                raise ValueError("percentages must sum to 100")
+            return apportion(amount_cents, params)
+        case "exact":                            # params: {id: cents}
+            if sum(params.values()) != amount_cents:
+                raise ValueError("exact shares must sum to the expense amount")
+            return params
 ```
 
-Recording an expense is a single atomic write; there are no balances to update:
+Equal split is just unit weights; percentage and weighted splits pass the percentages/weights straight through, since `apportion` is scale-invariant. Recording the expense is then a single atomic write — there are no balances to update:
 
 ```python
-def add_expense(group_id, payer_id, amount_cents, participants, currency,
-                description, custom_shares=None):
-    if custom_shares is not None:
-        if sum(custom_shares.values()) != amount_cents:
-            raise ValueError("custom shares must sum to the expense amount")
-        shares = custom_shares
-    else:
-        # participants is the set who consume; expand from group_members for "everyone"
-        shares = even_shares(amount_cents, participants)
-
+def add_expense(group_id, payer_id, amount_cents, currency, description,
+                participants, mode="equal", params=None):
+    shares = compute_shares(amount_cents, participants, mode, params)
     with db.transaction():
         expense_id = db.insert_expense(
             group_id, payer_id, amount_cents, currency, description, created_by=payer_id
@@ -233,7 +271,7 @@ def add_expense(group_id, payer_id, amount_cents, participants, currency,
     return expense_id
 ```
 
-Note the payer is just another participant: include them in `participants` if they share the cost, omit them if they don't. Their net position falls out of the balance formula either way.
+The payer is just another participant: their share is computed like anyone else's, and their net position (paid − consumed) falls out of the balance formula. Excluding the payer simply means they get no `expense_shares` row.
 
 ### Debt simplification (should-have)
 
