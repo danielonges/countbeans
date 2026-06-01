@@ -5,7 +5,6 @@ Each test rolls back via the session fixture.
 """
 from datetime import datetime, timezone
 
-import pytest
 import uuid_utils
 from sqlalchemy.ext.asyncio import AsyncSession
 

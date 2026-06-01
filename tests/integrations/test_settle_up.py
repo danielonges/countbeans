@@ -7,7 +7,6 @@ The ``_SessionUoW`` wrapper re-uses the test's already-open session so that
 ``settle_up`` runs inside the same transaction and can see the seeded rows.
 """
 import uuid
-from typing import AsyncGenerator
 
 import pytest
 import uuid_utils

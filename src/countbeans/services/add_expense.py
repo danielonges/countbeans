@@ -4,7 +4,7 @@ from typing import cast
 
 import uuid_utils
 
-from countbeans.db.models import Expense, ExpenseShare
+from countbeans.db.models import Expense
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.dto.results import ExpenseCreatedResult
 
