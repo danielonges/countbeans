@@ -81,9 +81,10 @@ ops) and a `downgrade base` → `upgrade head` round-trip are good sanity checks
   (e.g. `amount_positive`) — the convention prefixes `ck_<table>_`.
 - **env.py** loads the DSN from `Settings` (never `alembic.ini`) and enables
   `compare_type` / `compare_server_default` so type and default drift is caught.
-- **Host-side Alembic** (outside Docker) works only if Docker Desktop forwards
-  the published `5433` port; if it doesn't on your machine, use the in-container
-  commands above.
+- **The Compose Postgres is not published to the host.** Run every DB-touching
+  command — `migrate`, autogenerate, the bot — through Docker as shown above.
+  Host-side Alembic only applies against a *separate* local Postgres you run
+  yourself (the `localhost:5432` DSN in `.env.example`).
 
 ## Architecture
 
