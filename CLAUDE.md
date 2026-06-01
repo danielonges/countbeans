@@ -8,21 +8,18 @@ countbeans is a Telegram bot for tracking and splitting shared expenses within T
 
 ## Commands
 
+All development and testing runs inside Docker. Do not run the bot or tests directly on the host.
+
 ```bash
-# Install dependencies
+# Install dependencies (for editor tooling / type checking only — not for running)
 uv sync
 
-# Run the bot (local, no Docker)
-uv run countbeans
-
 # Run tests
-uv run pytest
+docker compose -f compose.yml -f compose.dev.yml run --rm bot uv run pytest
 
 # Run a single test
-uv run pytest tests/path/to/test_file.py::test_name
+docker compose -f compose.yml -f compose.dev.yml run --rm bot uv run pytest tests/path/to/test_file.py::test_name
 ```
-
-**Docker (recommended for running with a real database):**
 
 ```bash
 # Development — auto-reloads bot on code changes (uses compose.dev.yml overlay)
@@ -83,8 +80,6 @@ ops) and a `downgrade base` → `upgrade head` round-trip are good sanity checks
   `compare_type` / `compare_server_default` so type and default drift is caught.
 - **The Compose Postgres is not published to the host.** Run every DB-touching
   command — `migrate`, autogenerate, the bot — through Docker as shown above.
-  Host-side Alembic only applies against a *separate* local Postgres you run
-  yourself (the `localhost:5432` DSN in `.env.example`).
 
 ## Architecture
 
