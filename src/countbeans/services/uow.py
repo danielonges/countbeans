@@ -2,6 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .repositories import (
+    BalanceRepository,
     ExpenseRepository,
     GroupMemberRepository,
     GroupRepository,
@@ -20,6 +21,7 @@ class UnitOfWork:
         await self._session.__aenter__()
         self.settlements = SettlementRepository(self._session)
         self.expenses = ExpenseRepository(self._session)
+        self.balances = BalanceRepository(self._session)
         self.users = UserRepository(self._session)
         self.groups = GroupRepository(self._session)
         self.group_members = GroupMemberRepository(self._session)
