@@ -76,7 +76,7 @@ These cut across the whole data model and are the reason the schema below differ
 
 - *Must-have*: group expense tracking; basic expense input and derived balances; persistent storage; per-user balance summaries; settling up (full **or partial** payments).
 - *Should-have*: uneven splits (exact amounts, percentages, weights) and selecting a subset of the group; debt simplification (minimal set of transfers to settle a group); multi-currency support.
-- *Could-have*: expense categories; notifications for outstanding debts; multiple payers per expense.
+- *Could-have*: expense categories; notifications for outstanding debts; multiple payers per expense; a group info command surfacing membership, coverage gap, and activity.
 - *Won't-have*: any web or mobile interface outside Telegram.
 
 ### Key commands
@@ -84,6 +84,7 @@ These cut across the whole data model and are the reason the schema below differ
 - `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
 - `/balance` — show the caller's net balance with other group members (derived from the ledger).
 - `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`.
+- `/group` — show group info: name and default currency; the **known members** the bot can split among, with pending placeholders flagged separately (mentioned but not yet `/start`-ed); the **coverage gap** (`known` vs `getChatMemberCount`) so people can see who still needs to join; and a quick activity summary (active expenses and total tracked, per currency).
 
 ### Components
 
