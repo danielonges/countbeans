@@ -24,12 +24,39 @@ uv run pytest tests/path/to/test_file.py::test_name
 
 ## Architecture
 
-The project has two runtime entry points that currently operate independently:
+The architectural commitment is a **standalone, framework-agnostic service core** (`countbeans.services`, the "Expense manager") that owns all database access and knows nothing about Telegram or HTTP. Everything else is a **thin adapter** over it. Today there is exactly one adapter — the `aiogram` bot — calling the core **in-process** (same process, plain Python function calls, no network hop). An HTTP layer is **deferred** (see "The HTTP layer is deferred" below), not part of the current build.
 
-- **Telegram bot** (`src/countbeans/main.py`): Built with `aiogram` (async-first Bot API). Handles group chat commands and is the primary user-facing interface. Run via `uv run countbeans`.
-- **FastAPI server** (`src/countbeans/apis/`): HTTP API layer (planned; not yet implemented).
+```
+Telegram  ──long-poll──▶  aiogram bot   (single process, single event loop)
+                               │  parses grammar, FSM (multi-step state),
+                               │  getChatMember / getChatMemberCount, formats replies
+                               ▼
+                    countbeans.services   ("Expense manager")
+                    stateless, transactional; in-process call; returns DTOs
+                               │
+                    SQLAlchemy + asyncpg  ──▶  PostgreSQL
 
-Both share the config in `src/countbeans/config/` for settings (see below).
+  ┄ deferred / optional, add only when a need is real (see below): ┄
+  Telegram ──webhook──▶ HTTP shell (FastAPI or aiogram's aiohttp) ──▶ same services
+```
+
+The layers and their responsibilities:
+
+- **Service core** (`src/countbeans/services/`, the "Expense manager"): the **only** place that touches the database. Validates and records expenses/settlements as ledger events, computes derived balances, runs `simplify()`. **Stateless** (no per-conversation state) and **transactional** (one SQLAlchemy transaction per command). Accepts and returns plain **Pydantic DTOs** — never `aiogram` or HTTP request/response types — so it has no knowledge of who called it.
+- **Bot layer** (`src/countbeans/main.py` + handlers, `aiogram`): a thin Telegram adapter and the **only runtime entry point today**. Parses command grammar (amount, description, participants), holds **all multi-step conversational state in aiogram's FSM** (the `@all` coverage confirm, admin-gated `/simplify` flows), makes Telegram-only calls (`getChatMember`, `getChatMemberCount`), calls the service core in-process, and formats replies. Owns nothing the service core owns.
+
+**Why in-process, not HTTP-between-layers:** this is an append-only **money ledger** (every expense must reconcile exactly). An in-process call is one transaction boundary with unambiguous success/failure; an HTTP hop would force idempotency keys to avoid double-recording an expense on a timeout/retry — real complexity for no benefit, since web/mobile is explicitly out of scope and a Telegram expense bot never needs the bot and logic to scale apart. This rule holds even if an HTTP shell is added later: it sits *beside* the bot as another adapter, never *between* the bot and the ledger logic.
+
+**Deployment:** one process, one event loop — the bot runs on **long-polling** (`dp.start_polling`, exactly what `main.py` does today) with **no inbound HTTP server at all**. For the Telegram-only, low-traffic scope this is the whole production runtime; there is nothing else to deploy.
+
+**The HTTP layer is deferred.** Web/mobile is explicitly *Won't-have* and the bot is low-traffic, so FastAPI/`uvicorn` — though present in `pyproject.toml` — are currently **unused**, and `src/countbeans/apis/` is not built. Add an HTTP shell **only** when a concrete need appears, and even then it's an *additive* adapter over the existing service core, never a rewrite:
+  - **Webhooks** (lower latency / no long-poll connection at scale) — webhooks need an inbound HTTP server (long-polling does not); host them on aiogram's own aiohttp server *or* FastAPI.
+  - **Ops probes** (`/healthz`, readiness) — only if the deploy target probes HTTP for liveness; otherwise a polling process needs none.
+  - **A non-Telegram client** (admin dashboard, web UI) — would wrap the *same* services as a second thin, stateless adapter; nothing in the core changes.
+
+**Naming & cross-layer flow.** The Product Spec below says "**the bot**" to mean the product as a whole, for readability — it is *not* a claim that the bot adapter does the work itself. Concretely, every **database read or write** named anywhere in this spec — recording an expense, the onboarding upsert into `users`/`group_members`, **claiming** a placeholder, deriving balances, running `simplify()` — is performed by the **service core**, the only layer with DB access. The bot adapter only **parses, holds FSM state, calls Telegram APIs** (`getChatMember`, `getChatMemberCount`), and **formats replies**. So a typical command flows: *bot parses + checks Telegram* → *service core validates, writes, and derives in one transaction* → *bot formats the reply*. The cross-layer cases are the same shape — e.g. the `@all` **coverage check** combines a bot-layer `getChatMemberCount` with a service-core `known` count, and the bot's FSM drives block-until-confirmed before the service core records anything.
+
+All layers share the config in `src/countbeans/config/` for settings (see below).
 
 **Planned data layer**: PostgreSQL via SQLAlchemy + asyncpg, with Alembic for migrations. The schema (users, groups, group_members, expenses, expense_shares, settlements) is specified in the Product Spec below but not yet implemented. Balances are **derived** from the ledger, not stored.
 
@@ -89,9 +116,11 @@ These cut across the whole data model and are the reason the schema below differ
 
 ### Components
 
-- **Telegram bot** — listens for commands/messages in groups, parses command structure and parameters (amount, description, participants), and sends confirmation/balance responses back to the group.
-- **Bot server** — FastAPI backend that processes parsed commands, manages multi-step interaction state, handles error cases (missing data, bad formatting), and talks to the database.
-- **Expense manager** — validates and records expenses and settlements as ledger events, and computes derived balances (and, optionally, a simplified set of transfers).
+These are **layered adapters over one shared service core**, all in a single process — see "Architecture" above for the interaction model and the rationale for keeping the boundary in-process rather than over HTTP.
+
+- **Telegram bot** (`aiogram`) — listens for commands/messages in groups, parses command structure and parameters (amount, description, participants), and sends confirmation/balance responses back to the group. **Owns all multi-step interaction state** via aiogram's FSM (e.g. the `@all` coverage confirm and admin-gated `/simplify` flows) and makes Telegram-only calls (`getChatMember`, `getChatMemberCount`). Calls the Expense manager directly (in-process); never touches the database itself.
+- **HTTP shell** (deferred — FastAPI or aiogram's aiohttp) — **not part of the current build.** The runtime today is the bot on long-polling with no inbound HTTP server. If one is added later (for webhooks, a `/healthz` probe, or a non-Telegram client), it is a *second* thin, **stateless** adapter over the same Expense manager — no per-conversation state (that lives in the bot's FSM), no business logic of its own, and never an HTTP hop between the bot and the ledger. See "Architecture".
+- **Expense manager** (`countbeans.services`) — the **only** component that talks to the database. Validates and records expenses and settlements as ledger events, computes derived balances (and, optionally, a simplified set of transfers). Stateless and transactional (one transaction per command); accepts/returns Pydantic DTOs, with no knowledge of Telegram or HTTP.
 - **Database** — persists users, group membership, and the immutable ledger of expenses, expense shares, and settlements.
 
 ### Onboarding & membership
