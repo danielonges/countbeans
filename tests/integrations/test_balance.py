@@ -1,0 +1,149 @@
+"""Integration tests for the balance service — derives ledger balances from the DB.
+
+Uses an ephemeral Postgres container (Testcontainers via conftest.py).
+Each test rolls back via the session fixture.
+"""
+from datetime import datetime, timezone
+
+import pytest
+import uuid_utils
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.services.balance import compute_balances, get_group_summary
+from countbeans.services.repositories import BalanceRepository, GroupRepository, UserRepository
+
+
+class _SessionUoW:
+    def __init__(self, session: AsyncSession) -> None:
+        self.balances = BalanceRepository(session)
+        self.users = UserRepository(session)
+        self.groups = GroupRepository(session)
+
+
+def _user(**kw: object) -> User:
+    return User(id=uuid_utils.uuid7(), **kw)
+
+
+def _group(chat_id: int = 1) -> Group:
+    return Group(id=uuid_utils.uuid7(), telegram_chat_id=chat_id, default_currency="SGD")
+
+
+async def _seed(session: AsyncSession, n: int = 2) -> tuple[Group, list[User]]:
+    group = _group()
+    users = [_user() for _ in range(n)]
+    session.add(group)
+    session.add_all(users)
+    await session.flush()
+    session.add_all([GroupMember(group_id=group.id, user_id=u.id) for u in users])
+    await session.flush()
+    return group, users
+
+
+def _expense(group: Group, payer: User, amount: int, currency: str = "SGD") -> Expense:
+    return Expense(
+        id=uuid_utils.uuid7(),
+        group_id=group.id,
+        payer_id=payer.id,
+        amount_cents=amount,
+        currency=currency,
+        created_by=payer.id,
+    )
+
+
+def _share(expense: Expense, user: User, cents: int) -> ExpenseShare:
+    return ExpenseShare(expense_id=expense.id, user_id=user.id, share_cents=cents)
+
+
+def _settlement(group: Group, frm: User, to: User, amount: int, currency: str = "SGD") -> Settlement:
+    return Settlement(
+        id=uuid_utils.uuid7(),
+        group_id=group.id,
+        from_user_id=frm.id,
+        to_user_id=to.id,
+        amount_cents=amount,
+        currency=currency,
+    )
+
+
+async def test_no_data_empty_balances(session: AsyncSession) -> None:
+    group, _ = await _seed(session)
+    uow = _SessionUoW(session)
+    raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert raw == {}
+
+
+async def test_single_expense_balances(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed(session)
+    exp = _expense(group, alice, 100)
+    session.add(exp)
+    await session.flush()
+    session.add_all([_share(exp, alice, 50), _share(exp, bob, 50)])
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+
+    assert raw[(alice.id, "SGD")] == 50   # +100 fronted − 50 share
+    assert raw[(bob.id, "SGD")] == -50
+    assert sum(raw.values()) == 0
+
+
+async def test_settlement_zeroes_balance(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed(session)
+    exp = _expense(group, alice, 100)
+    session.add(exp)
+    await session.flush()
+    session.add_all([_share(exp, alice, 50), _share(exp, bob, 50)])
+    s = _settlement(group, bob, alice, 50)
+    session.add(s)
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert raw == {}
+
+
+async def test_sum_to_zero_three_users(session: AsyncSession) -> None:
+    group, (alice, bob, carol) = await _seed(session, n=3)
+    exp = _expense(group, alice, 90)
+    session.add(exp)
+    await session.flush()
+    session.add_all([_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)])
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert sum(raw.values()) == 0
+
+
+async def test_get_group_summary(session: AsyncSession) -> None:
+    group, (alice, bob, carol) = await _seed(session, n=3)
+    exp = _expense(group, alice, 90)
+    session.add(exp)
+    await session.flush()
+    session.add_all([_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)])
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    summary = await get_group_summary(uow, group.id)  # type: ignore[arg-type]
+
+    assert len(summary.balances) == 3
+    alice_bal = next(b for b in summary.balances if b.user_id == alice.id)
+    assert alice_bal.balance_cents == 60
+    assert len(summary.suggested_transfers) == 2
+    assert all(t.to_user_id == alice.id for t in summary.suggested_transfers)
+
+
+async def test_voided_expense_excluded(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed(session)
+    exp = _expense(group, alice, 100)
+    exp.voided_at = datetime.now(timezone.utc)
+    session.add(exp)
+    await session.flush()
+    session.add_all([_share(exp, alice, 50), _share(exp, bob, 50)])
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert raw == {}
