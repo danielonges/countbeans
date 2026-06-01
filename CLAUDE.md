@@ -25,10 +25,13 @@ uv run pytest tests/path/to/test_file.py::test_name
 **Docker (recommended for running with a real database):**
 
 ```bash
-# Build image and start bot + postgres
+# Development — auto-reloads bot on code changes (uses compose.dev.yml overlay)
+docker compose -f compose.yml -f compose.dev.yml up --build
+
+# Production-like — no auto-reload, code baked into image
 docker compose up --build
 
-# Start without rebuilding (after first run)
+# Start without rebuilding (after first run, no code changes)
 docker compose up
 
 # Stop and remove containers (data volume is preserved)

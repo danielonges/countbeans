@@ -30,6 +30,7 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+    "watchfiles>=1.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
