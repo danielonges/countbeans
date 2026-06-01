@@ -1,5 +1,6 @@
 """settle_up service function — records a settlement payment in the ledger."""
 import uuid
+from typing import cast
 
 import uuid_utils
 
@@ -14,7 +15,7 @@ async def settle_up(uow: UnitOfWork, cmd: SettleUpCommand) -> SettlementCreatedR
     if cmd.from_user_id == cmd.to_user_id:
         raise ValueError("from_user_id and to_user_id must be different users")
 
-    settlement_id: uuid.UUID = uuid_utils.uuid7()
+    settlement_id = cast(uuid.UUID, uuid_utils.uuid7())
     settlement = Settlement(
         id=settlement_id,
         group_id=cmd.group_id,
