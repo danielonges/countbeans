@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.config.core import get_settings
+from countbeans.config import get_settings
 
 logging.basicConfig(
     level=logging.INFO,
