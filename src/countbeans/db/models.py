@@ -24,7 +24,7 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     group_name: Mapped[Optional[str]] = mapped_column(String(255))
-    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="SGD")
     simplify_debts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     __table_args__ = (

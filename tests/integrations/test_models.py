@@ -11,7 +11,7 @@ def _user(**kwargs) -> User:
 
 
 def _group(telegram_chat_id: int = 1, **kwargs) -> Group:
-    return Group(id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="USD", **kwargs)
+    return Group(id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="SGD", **kwargs)
 
 
 def _expense(group: Group, payer: User, **kwargs) -> Expense:
@@ -21,7 +21,7 @@ def _expense(group: Group, payer: User, **kwargs) -> Expense:
         payer_id=payer.id,
         created_by=payer.id,
         amount_cents=1000,
-        currency="USD",
+        currency="SGD",
         **kwargs,
     )
 
@@ -33,7 +33,7 @@ def _settlement(group: Group, from_user: User, to_user: User, **kwargs) -> Settl
         from_user_id=from_user.id,
         to_user_id=to_user.id,
         amount_cents=500,
-        currency="USD",
+        currency="SGD",
         **kwargs,
     )
 
