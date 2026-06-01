@@ -1,5 +1,6 @@
 from functools import cache
 
+from pydantic import PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,9 +12,9 @@ class Settings(BaseSettings):
     )
 
     api_id: int
-    api_hash: str
-    bot_token: str
-    database_url: str
+    api_hash: SecretStr
+    bot_token: SecretStr
+    database_url: PostgresDsn
     log_level: str = "INFO"
     log_format: str = "text"
 

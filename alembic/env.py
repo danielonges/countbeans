@@ -18,7 +18,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Inject the database URL from Settings so alembic.ini never holds credentials.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
 
 
 def run_migrations_offline() -> None:
