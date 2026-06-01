@@ -8,17 +8,19 @@ countbeans is a Telegram bot for tracking and splitting shared expenses within T
 
 ## Commands
 
-All development and testing runs inside Docker. Do not run the bot or tests directly on the host.
+All tests run directly on the host. Integration tests use Testcontainers — pytest spins up an ephemeral Postgres container automatically, no manual Docker orchestration needed.
+
+> **Note:** Testcontainers requires working host→container port-forwarding. This is broken on some Docker Desktop + Apple Silicon configurations (symptom: `Can't assign requested address` when connecting to `127.0.0.1`). OrbStack is a reliable alternative on Mac.
 
 ```bash
-# Install dependencies (for editor tooling / type checking only — not for running)
+# Install dependencies
 uv sync
 
-# Run tests
-docker compose -f compose.yml -f compose.dev.yml run --rm bot uv run pytest
+# Run all tests
+uv run pytest
 
 # Run a single test
-docker compose -f compose.yml -f compose.dev.yml run --rm bot uv run pytest tests/path/to/test_file.py::test_name
+uv run pytest tests/path/to/test_file.py::test_name
 ```
 
 ```bash
