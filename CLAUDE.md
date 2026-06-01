@@ -81,7 +81,7 @@ These cut across the whole data model and are the reason the schema below differ
 
 ### Key commands
 
-- `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2` weight (see "Splitting an expense").
+- `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
 - `/balance` — show the caller's net balance with other group members (derived from the ledger).
 - `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`.
 
@@ -217,7 +217,7 @@ A split is two independent choices: **who** is in it (participant selection) and
 | Equal | `/addexpense 60 Dinner @a @b` | even split across participants |
 | Exact | `/addexpense 50 Dinner @a:30 @b:20` | per-person cents; must sum to the amount |
 | Percentage | `/addexpense 50 Dinner @a:60% @b:40%` | percentages must sum to 100 |
-| Weighted | `/addexpense 50 Dinner @a:2 @b:1` | split in proportion to integer weights |
+| Weighted | `/addexpense 50 Dinner @a:2x @b:1x` | split in proportion to integer weights |
 
 Equal, percentage, and weighted splits are the *same* operation — apportion the amount in proportion to integer weights — using the **largest-remainder method** so the cents always reconcile. Exact mode skips apportionment and takes the given cents after validating their sum.
 
@@ -272,6 +272,35 @@ def add_expense(group_id, payer_id, amount_cents, currency, description,
 ```
 
 The payer is just another participant: their share is computed like anyone else's, and their net position (paid − consumed) falls out of the balance formula. Excluding the payer simply means they get no `expense_shares` row.
+
+### Command parsing & validation
+
+`/addexpense` grammar:
+
+```
+/addexpense <amount> <description> [<participant> ...]
+<participant> ::= "@" handle [ ":" <suffix> ]
+<suffix>      ::= number          ; exact amount   e.g. @a:30
+                | number "%"      ; percentage     e.g. @a:60%
+                | number "x"      ; weight/shares  e.g. @a:2x
+```
+
+Parse first, then validate:
+
+1. **Amount** — positive, at most 2 decimal places, parsed to integer cents **from the string** (never via `float`). Reject `0`, negatives, and >2 dp. Currency is the group default.
+2. **Description** — a quoted `"…"` string, or the run of words between the amount and the first `@mention`. Use quotes if it contains `@`. May be empty.
+3. **One mode per command, inferred from the suffixes:**
+   - No suffix on any mention → **equal**.
+   - All suffixes end in `%` → **percentage**; must sum to 100.
+   - All suffixes end in `x` → **weighted**.
+   - All suffixes are bare numbers → **exact**; must sum to the amount.
+   - **Mixing families is rejected** (`@a:30 @b:40%` → error), and in any non-equal mode **every** participant must carry a suffix of that family (`@a:60% @b` → error).
+4. **Participants** — duplicate handles are rejected. The payer is added automatically (deduped if they also @mention themselves); an explicit exclude flag drops the payer's share.
+5. **`@all`** — must appear alone with no suffixes; splits equally across all current `group_members`. Omitting mentions entirely is equivalent to `@all`.
+6. **Unknown handles are not errors** — they become pending placeholders (see Onboarding).
+7. Fractional percentages (≤2 dp) are carried as integer **basis points** (sum must be 10000) so `apportion` stays integer-only.
+
+`/settleup @user <amount>` — `<amount>` follows rule 1; `@user` must resolve to a participant (or becomes a placeholder); settling with yourself is rejected.
 
 ### Debt simplification (should-have)
 
