@@ -19,18 +19,19 @@ logger = logging.getLogger(__name__)
 dp = Dispatcher()
 
 
-@dp.message(Command("start"), F.chat.type.in_({"group", "supergroup"}))
 async def start_group(message: Message) -> None:
     logger.info("Effective chat: %s", message.chat)
     await message.answer(f"Have some dirt on yall: {message.chat.username}")
 
 
-@dp.message(Command("start"))
 async def start_private(message: Message) -> None:
     await message.answer("I'm a bot, please talk to me!")
 
 
 def main() -> int:
+    dp.message.register(start_group, Command("start"), F.chat.type.in_({"group", "supergroup"}))
+    dp.message.register(start_private, Command("start"))
+
     settings = get_settings()
     bot = Bot(token=settings.bot_token)
 
