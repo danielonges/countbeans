@@ -98,26 +98,29 @@ There is intentionally **no `debts` table** — balances are derived (see below)
 ```sql
 -- Telegram users seen by the bot
 CREATE TABLE users (
-  user_id     BIGINT PRIMARY KEY,         -- Telegram user ID
-  username    TEXT,                        -- @handle (mutable on Telegram; not a key)
-  first_name  TEXT,
-  last_name   TEXT
+  user_id     BIGINT PRIMARY KEY,
+  username    VARCHAR(255),                -- @handle (mutable on Telegram; not a key)
+  first_name  VARCHAR(255),
+  last_name   VARCHAR(255)
 );
 
 -- Telegram groups the bot is in
 CREATE TABLE groups (
   group_id          BIGINT PRIMARY KEY,    -- Telegram chat ID
-  group_name        TEXT,
-  default_currency  CHAR(3) NOT NULL DEFAULT 'USD'   -- ISO 4217
+  group_name        VARCHAR(255),
+  default_currency  CHAR(3) NOT NULL DEFAULT 'USD',   -- ISO 4217
+  CHECK (LENGTH(default_currency) = 3)
 );
 
--- Membership, so we can split "evenly among everyone in the group"
+-- Membership, so we can split "evenly among everyone in the group".
+-- PK includes joined_at so that a user who leaves and rejoins can be
+-- represented as a new membership period without losing history.
 CREATE TABLE group_members (
   group_id   BIGINT NOT NULL REFERENCES groups(group_id),
   user_id    BIGINT NOT NULL REFERENCES users(user_id),
-  joined_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  left_at    TIMESTAMPTZ,                  -- NULL = still a member
-  PRIMARY KEY (group_id, user_id)
+  joined_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  left_at    TIMESTAMP WITH TIME ZONE,    -- NULL = still a member
+  PRIMARY KEY (group_id, user_id, joined_at)
 );
 
 -- Immutable expense events; soft-deleted via voided_at
@@ -126,11 +129,11 @@ CREATE TABLE expenses (
   group_id      BIGINT NOT NULL REFERENCES groups(group_id),
   payer_id      BIGINT NOT NULL REFERENCES users(user_id),
   amount_cents  BIGINT NOT NULL CHECK (amount_cents > 0),   -- integer minor units
-  currency      CHAR(3) NOT NULL,
-  description   TEXT,
+  currency      CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
+  description   VARCHAR(255),
   created_by    BIGINT NOT NULL REFERENCES users(user_id),
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  voided_at     TIMESTAMPTZ,                                -- NULL = active
+  created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  voided_at     TIMESTAMP WITH TIME ZONE,                   -- NULL = active
   voided_by     BIGINT REFERENCES users(user_id)
 );
 
@@ -149,8 +152,8 @@ CREATE TABLE settlements (
   from_user_id   BIGINT NOT NULL REFERENCES users(user_id),  -- pays
   to_user_id     BIGINT NOT NULL REFERENCES users(user_id),  -- receives
   amount_cents   BIGINT NOT NULL CHECK (amount_cents > 0),
-  currency       CHAR(3) NOT NULL,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  currency       CHAR(3) NOT NULL CHECK (LENGTH(currency) = 3),
+  created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (from_user_id <> to_user_id)
 );
 ```
