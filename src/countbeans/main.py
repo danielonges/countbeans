@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import sys
 
 from aiogram import Bot, Dispatcher, F
@@ -7,14 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from countbeans.config import get_settings
+from countbeans.log import get_logger, setup as setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 dp = Dispatcher()
 
@@ -29,10 +23,12 @@ async def start_private(message: Message) -> None:
 
 
 def main() -> int:
+    settings = get_settings()
+    setup_logging(level=settings.log_level)
+
     dp.message.register(start_group, Command("start"), F.chat.type.in_({"group", "supergroup"}))
     dp.message.register(start_private, Command("start"))
 
-    settings = get_settings()
     bot = Bot(token=settings.bot_token)
 
     async def run() -> None:
