@@ -20,6 +20,7 @@ services:
     env_file: .env
     environment:
       COUNTBEANS_DATABASE_URL: postgresql+asyncpg://countbeans:countbeans@db:5432/countbeans
+      COUNTBEANS_LOG_FORMAT: json
     depends_on:
       db:
         condition: service_healthy

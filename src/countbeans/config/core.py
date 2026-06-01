@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     api_hash: str
     bot_token: str
     log_level: str = "INFO"
+    log_format: str = "text"
 
 
 @cache

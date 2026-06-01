@@ -12,6 +12,7 @@ dependencies = [
     "aiogram>=3.28.2",
     "uuid-utils>=0.16.0",
     "pydantic>=2.13.4",
+    "python-json-logger>=4.1.0",
 ]
 
 [project.scripts]

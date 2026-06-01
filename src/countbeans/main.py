@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from countbeans.config import get_settings
-from countbeans.log import get_logger, setup as setup_logging
+from countbeans.logging import get_logger, setup as setup_logging
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,7 @@ async def start_private(message: Message) -> None:
 
 def main() -> int:
     settings = get_settings()
-    setup_logging(level=settings.log_level)
+    setup_logging(level=settings.log_level, fmt=settings.log_format)
 
     dp.message.register(start_group, Command("start"), F.chat.type.in_({"group", "supergroup"}))
     dp.message.register(start_private, Command("start"))
