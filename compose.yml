@@ -40,5 +40,41 @@ services:
       COUNTBEANS_DATABASE_URL: *database-url
     command: ["uv", "run", "alembic", "upgrade", "head"]
 
+  # Ephemeral Postgres for the test suite — tmpfs (no volume), wiped on teardown.
+  # Profile-gated so a plain `docker compose up` never starts it.
+  test-db:
+    image: postgres:17-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: countbeans
+      POSTGRES_USER: countbeans
+      POSTGRES_PASSWORD: countbeans
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U countbeans"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Runs the integration suite inside the Compose network, reaching test-db
+  # directly (no host port-forwarding). Source/tests are bind-mounted, so no
+  # rebuild on change. On-demand:  docker compose --profile test run --rm test
+  test:
+    build:
+      context: .
+      target: test
+    profiles: ["test"]
+    depends_on:
+      test-db:
+        condition: service_healthy
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://countbeans:countbeans@test-db:5432/countbeans
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    command: ["uv", "run", "--no-sync", "pytest", "tests/integrations"]
+
 volumes:
   db_data:

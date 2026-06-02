@@ -1,6 +1,6 @@
 import pytest
-import uuid_utils
-from sqlalchemy.exc import IntegrityError
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, Settlement, User
@@ -11,29 +11,30 @@ def _user(**kwargs) -> User:
 
 
 def _group(telegram_chat_id: int = 1, **kwargs) -> Group:
-    return Group(id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="SGD", **kwargs)
+    kwargs.setdefault("default_currency", "SGD")
+    return Group(id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, **kwargs)
 
 
 def _expense(group: Group, payer: User, **kwargs) -> Expense:
+    kwargs.setdefault("amount_cents", 1000)
+    kwargs.setdefault("currency", "SGD")
     return Expense(
         id=uuid_utils.uuid7(),
         group_id=group.id,
         payer_id=payer.id,
         created_by=payer.id,
-        amount_cents=1000,
-        currency="SGD",
         **kwargs,
     )
 
 
 def _settlement(group: Group, from_user: User, to_user: User, **kwargs) -> Settlement:
+    kwargs.setdefault("amount_cents", 500)
+    kwargs.setdefault("currency", "SGD")
     return Settlement(
         id=uuid_utils.uuid7(),
         group_id=group.id,
         from_user_id=from_user.id,
         to_user_id=to_user.id,
-        amount_cents=500,
-        currency="SGD",
         **kwargs,
     )
 
@@ -89,8 +90,9 @@ async def test_group_currency_check_rejects_short(session: AsyncSession) -> None
 
 
 async def test_group_currency_check_rejects_long(session: AsyncSession) -> None:
+    # 4 chars overflows VARCHAR(3) → truncation (DBAPIError) before the CHECK runs.
     session.add(_group(default_currency="USDD"))
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await session.flush()
 
 
@@ -133,8 +135,9 @@ async def test_expense_currency_check_rejects_long(session: AsyncSession) -> Non
     group, user = _group(), _user()
     session.add_all([group, user])
     await session.flush()
+    # 4 chars overflows VARCHAR(3) → truncation (DBAPIError) before the CHECK runs.
     session.add(_expense(group, user, currency="USDD"))
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await session.flush()
 
 

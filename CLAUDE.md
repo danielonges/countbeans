@@ -8,20 +8,26 @@ countbeans is a Telegram bot for tracking and splitting shared expenses within T
 
 ## Commands
 
-All tests run directly on the host. Integration tests use Testcontainers — pytest spins up an ephemeral Postgres container automatically, no manual Docker orchestration needed.
-
-> **Note:** Testcontainers requires working host→container port-forwarding. This is broken on some Docker Desktop + Apple Silicon configurations (symptom: `Can't assign requested address` when connecting to `127.0.0.1`). OrbStack is a reliable alternative on Mac.
+**Unit tests** run on the host. **Integration tests** need Postgres and run inside the Compose network (the `test` service against an ephemeral `test-db`) — reaching the DB container directly, which sidesteps host→container port-forwarding (broken on some Docker Desktop + Apple Silicon setups: `Can't assign requested address` on `127.0.0.1`). They get their DSN from `TEST_DATABASE_URL`; when it's unset, `pytest` **skips** them.
 
 ```bash
 # Install dependencies
 uv sync
 
-# Run all tests
-uv run pytest
+# Unit tests on the host (integration tests skip — no TEST_DATABASE_URL)
+uv run pytest tests/unit
 
-# Run a single test
-uv run pytest tests/path/to/test_file.py::test_name
+# Integration tests in Docker (spins up ephemeral test-db, runs the suite)
+docker compose --profile test run --rm test
+
+# A single integration test (override the service command)
+docker compose --profile test run --rm test uv run --no-sync pytest tests/integrations/test_balance.py::test_name -q
+
+# Tear down the test-db afterwards (tmpfs is wiped)
+docker compose --profile test down
 ```
+
+> **CI:** set `TEST_DATABASE_URL` to a service-container Postgres (or run the Compose `test` service) so integration tests actually run rather than silently skipping.
 
 ```bash
 # Development — auto-reloads bot on code changes (uses compose.dev.yml overlay)
