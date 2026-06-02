@@ -43,3 +43,17 @@ def test_currency_isolation() -> None:
     usd = [t for t in transfers if t.currency == "USD"]
     assert len(sgd) == 1
     assert len(usd) == 1
+
+
+def test_multi_debtor_multi_creditor_settles_exactly() -> None:
+    # Two debtors and two creditors: the transfers must draw both sides down to
+    # zero (no cartesian over-payment). Regression for the earlier bug where
+    # owed/credit were never decremented.
+    a, b, c, d = _uid(), _uid(), _uid(), _uid()
+    balances = {(a, "SGD"): -1, (b, "SGD"): -9, (c, "SGD"): 9, (d, "SGD"): 1}
+
+    net = dict(balances)
+    for t in _raw_pairwise_transfers(balances):
+        net[(t.from_user_id, t.currency)] += t.amount_cents
+        net[(t.to_user_id, t.currency)] -= t.amount_cents
+    assert all(v == 0 for v in net.values())

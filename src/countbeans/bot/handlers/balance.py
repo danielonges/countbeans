@@ -40,7 +40,7 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     show_all = len(parts) > 1 and parts[1].lower() == "all"
 
     if show_all:
-        summary = await get_group_summary(uow, group.id)
+        summary = await get_group_summary(uow, group.id, group.simplify_debts)
         if not summary.balances:
             await message.reply("No outstanding balances in this group.")
             return
@@ -52,7 +52,8 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
             lines.append(f"  {name}: {_fmt(b.balance_cents, b.currency)}")
 
         if summary.suggested_transfers:
-            lines.append("\nSuggested transfers:")
+            heading = "simplified" if group.simplify_debts else "raw"
+            lines.append(f"\nSuggested transfers ({heading}):")
             for t in summary.suggested_transfers:
                 from_name = f"@{username_by_id.get(t.from_user_id) or t.from_user_id}"
                 to_name = f"@{username_by_id.get(t.to_user_id) or t.to_user_id}"

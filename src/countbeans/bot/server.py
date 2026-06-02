@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
 
-from countbeans.bot.handlers import addexpense, balance, settleup, start
+from countbeans.bot.handlers import addexpense, balance, settleup, simplify, start
 from countbeans.bot.middleware import TransactionalMiddleware
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
@@ -22,6 +22,7 @@ async def run(token: str) -> None:
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
     dp.include_router(balance.router)
+    dp.include_router(simplify.router)
 
     bot = Bot(token=token)
     try:

@@ -3,7 +3,7 @@ import uuid
 from collections import defaultdict
 
 import uuid_utils
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,6 +172,15 @@ class GroupRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
+
+    async def set_simplify_debts(
+        self, group_id: uuid.UUID, simplify_debts: bool
+    ) -> None:
+        await self._session.execute(
+            update(Group)
+            .where(Group.id == group_id)
+            .values(simplify_debts=simplify_debts)
+        )
 
 
 class GroupMemberRepository:
