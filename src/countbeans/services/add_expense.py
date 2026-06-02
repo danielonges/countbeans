@@ -1,8 +1,7 @@
 """add_expense service function with split-computation helpers."""
 import uuid
-from typing import cast
 
-import uuid_utils
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
 
 from countbeans.db.models import Expense
 from countbeans.dto.commands import AddExpenseCommand
@@ -66,7 +65,7 @@ async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreated
     shares = compute_shares(
         cmd.amount_cents, list(cmd.participants), cmd.split_mode, cmd.split_params
     )
-    expense_id = cast(uuid.UUID, uuid_utils.uuid7())
+    expense_id = uuid_utils.uuid7()
     expense = Expense(
         id=expense_id,
         group_id=cmd.group_id,

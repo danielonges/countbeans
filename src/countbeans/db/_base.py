@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-import uuid_utils
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy import MetaData
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, mapped_column

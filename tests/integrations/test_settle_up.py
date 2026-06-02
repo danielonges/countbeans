@@ -9,7 +9,7 @@ The ``_SessionUoW`` wrapper re-uses the test's already-open session so that
 import uuid
 
 import pytest
-import uuid_utils
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

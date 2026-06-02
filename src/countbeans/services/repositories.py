@@ -2,7 +2,7 @@
 import uuid
 from collections import defaultdict
 
-import uuid_utils
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession

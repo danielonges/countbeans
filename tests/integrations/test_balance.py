@@ -6,7 +6,7 @@ Each test rolls back via the session fixture.
 import uuid
 from datetime import datetime, timezone
 
-import uuid_utils
+import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
@@ -38,18 +38,17 @@ def _settles(
 
 
 def _user(**kw: object) -> User:
-    # Use a stdlib uuid.UUID (what the DB returns) so ids compare/hash equal to
-    # the uuid.UUID fields on DTOs and the SQL-derived balance keys. A raw
-    # uuid_utils.UUID hashes differently, breaking dict lookups and set compares.
-    return User(id=uuid.UUID(str(uuid_utils.uuid7())), **kw)
+    return User(id=uuid_utils.uuid7(), **kw)
+
+
+def _group(chat_id: int = 1) -> Group:
+    return Group(id=uuid_utils.uuid7(), telegram_chat_id=chat_id, default_currency="SGD")
 
 
 async def _seed(session: AsyncSession, n: int = 2) -> tuple[Group, list[User]]:
-    # Source the group through the repository so group.id is a real uuid.UUID
-    # (RETURNING-processed), exactly as production does — DTOs built from it then
-    # validate cleanly, instead of carrying a raw uuid_utils.UUID.
-    group = await GroupRepository(session).upsert(telegram_chat_id=1, group_name=None)
+    group = _group()
     users = [_user() for _ in range(n)]
+    session.add(group)
     session.add_all(users)
     await session.flush()
     session.add_all([GroupMember(group_id=group.id, user_id=u.id) for u in users])
