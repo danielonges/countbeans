@@ -6,7 +6,7 @@ import logging
 import re
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.parsing import parse_amount_cents
@@ -18,20 +18,17 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-# Matches:  /settleup @handle 12.50
-#           /settleup @handle 12
-_COMMAND_RE = re.compile(
-    r"^/settleup\s+@([\w.]+)\s+(\d+(?:\.\d{1,2})?)$",
-    re.IGNORECASE,
-)
+# The command args (CommandObject strips "/settleup" and any "@botname"):
+#   @handle 12.50  |  @handle 12
+_ARGS_RE = re.compile(r"^@([\w.]+)\s+(\d+(?:\.\d{1,2})?)$")
 
 
 @router.message(Command("settleup"))
-async def cmd_settleup(message: Message, uow: UnitOfWork) -> None:
-    if message.text is None or message.from_user is None:
+async def cmd_settleup(message: Message, command: CommandObject, uow: UnitOfWork) -> None:
+    if message.from_user is None:
         return
 
-    match = _COMMAND_RE.match(message.text.strip())
+    match = _ARGS_RE.match((command.args or "").strip())
     if not match:
         await message.reply(
             "Usage: /settleup @username <amount>\n"

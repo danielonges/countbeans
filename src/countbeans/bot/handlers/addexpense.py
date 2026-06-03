@@ -6,7 +6,7 @@ import logging
 import re
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.parsing import parse_money
@@ -28,12 +28,14 @@ _USAGE = (
 
 
 @router.message(Command("addexpense"))
-async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
-    if message.text is None or message.from_user is None:
+async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWork) -> None:
+    if message.from_user is None:
         return
 
-    text = re.sub(r"^/addexpense\s*", "", message.text.strip(), flags=re.IGNORECASE)
-    tokens = text.split()
+    # command.args is everything after the command — already stripped of both
+    # "/addexpense" and any "@botname" suffix Telegram appends in groups, so a
+    # bare "/addexpense" (or "/addexpense@bot") yields no args and shows usage.
+    tokens = (command.args or "").split()
 
     if not tokens:
         await message.reply(_USAGE)
