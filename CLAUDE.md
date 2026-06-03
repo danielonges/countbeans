@@ -14,6 +14,11 @@ countbeans is a Telegram bot for tracking and splitting shared expenses within T
 # Install dependencies
 uv sync
 
+# Install the pre-commit hook (once per clone) — runs pyright before each
+# commit. .pre-commit-config.yaml is committed, but the installed hook in
+# .git/hooks is not, so every fresh clone must run this or the hook won't fire.
+uv run pre-commit install
+
 # Unit tests on the host (integration tests skip — no TEST_DATABASE_URL)
 uv run pytest tests/unit
 
