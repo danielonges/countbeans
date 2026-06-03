@@ -1,0 +1,16 @@
+# Pre-commit hooks. Install once per clone with: uv run pre-commit install
+#
+# pyright runs as a *local* hook (`uv run pyright`) rather than the upstream
+# mirror so it uses the project's pinned pyright and resolves against .venv —
+# the mirror manages its own isolated env and would miss installed deps.
+repos:
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        types: [python]
+        # pyright type-checks the whole project graph (see [tool.pyright]
+        # include in pyproject.toml), so don't hand it only the staged files.
+        pass_filenames: false
