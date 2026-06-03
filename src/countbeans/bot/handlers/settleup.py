@@ -53,7 +53,7 @@ async def cmd_settleup(message: Message, uow: UnitOfWork) -> None:
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
     )
-    to_user = await uow.users.get_or_create_placeholder(target_username)
+    to_user = await uow.users.resolve_mention(target_username)
     group = await uow.groups.upsert(
         telegram_chat_id=message.chat.id,
         group_name=getattr(message.chat, "title", None),

@@ -71,7 +71,7 @@ async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
     for handle in mentions:
         if handle == (message.from_user.username or ""):
             continue
-        u = await uow.users.get_or_create_placeholder(handle)
+        u = await uow.users.resolve_mention(handle)
         if u.id not in seen_ids:
             participant_users.append(u)
             seen_ids.add(u.id)

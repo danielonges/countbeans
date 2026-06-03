@@ -113,6 +113,23 @@ class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _by_telegram_id(self, telegram_user_id: int) -> User | None:
+        result = await self._session.execute(
+            select(User).where(User.telegram_user_id == telegram_user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def _pending_placeholder(self, username: str) -> User | None:
+        """The pending placeholder for a username (telegram_user_id IS NULL), if
+        any. App invariant: at most one per username."""
+        result = await self._session.execute(
+            select(User).where(
+                User.username == username,
+                User.telegram_user_id.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def upsert(
         self,
         telegram_user_id: int,
@@ -120,30 +137,63 @@ class UserRepository:
         first_name: str | None,
         last_name: str | None,
     ) -> User:
-        stmt = (
-            pg_insert(User)
-            .values(
-                id=uuid_utils.uuid7(),
-                telegram_user_id=telegram_user_id,
-                username=username,
-                first_name=first_name,
-                last_name=last_name,
-            )
-            .on_conflict_do_update(
-                index_elements=["telegram_user_id"],
-                set_={"username": username, "first_name": first_name, "last_name": last_name},
-            )
-            .returning(User)
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one()
+        """Onboard or refresh the interacting user, claiming a placeholder if one
+        is waiting.
 
-    async def get_or_create_placeholder(self, username: str) -> User:
-        result = await self._session.execute(
-            select(User).where(User.username == username, User.telegram_user_id.is_(None))
+        The first interaction of a previously-mentioned @handle is the *claim*: a
+        single-row UPDATE sets telegram_user_id on the existing placeholder, so
+        every expense_share / settlement already bound to that surrogate
+        users.id follows automatically — no fan-out rewrite (CLAUDE.md
+        "Onboarding & membership").
+        """
+        # Already a claimed identity: refresh the display alias and names.
+        existing = await self._by_telegram_id(telegram_user_id)
+        if existing is not None:
+            existing.username = username
+            existing.first_name = first_name
+            existing.last_name = last_name
+            await self._session.flush()
+            return existing
+
+        # First interaction: claim a matching pending placeholder if present.
+        if username is not None:
+            placeholder = await self._pending_placeholder(username)
+            if placeholder is not None:
+                placeholder.telegram_user_id = telegram_user_id
+                placeholder.first_name = first_name
+                placeholder.last_name = last_name
+                await self._session.flush()
+                return placeholder
+
+        # Genuinely new user: insert a fresh claimed row.
+        user = User(
+            id=uuid_utils.uuid7(),
+            telegram_user_id=telegram_user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
         )
-        existing = result.scalar_one_or_none()
-        if existing:
+        self._session.add(user)
+        await self._session.flush()
+        return user
+
+    async def resolve_mention(self, username: str) -> User:
+        """Resolve an @mention to a user row. Prefer someone we've already seen
+        (claimed: telegram_user_id IS NOT NULL) over a pending placeholder, and
+        create a new placeholder only when the handle is entirely unknown.
+
+        Matching is by username — a best-effort display-alias hint, never
+        identity (CLAUDE.md) — which is why a claimed row wins when a
+        rename/reuse has left both a claimed user and a placeholder under one
+        handle.
+        """
+        result = await self._session.execute(
+            select(User)
+            .where(User.username == username)
+            .order_by(User.telegram_user_id.is_(None))  # claimed (False) sorts first
+        )
+        existing = result.scalars().first()
+        if existing is not None:
             return existing
         user = User(id=uuid_utils.uuid7(), username=username)
         self._session.add(user)
