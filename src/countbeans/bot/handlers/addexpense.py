@@ -100,7 +100,13 @@ async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWo
         await message.reply(f"Invalid command: {exc}")
         return
 
-    result = await add_expense(uow, cmd)
+    # add_expense raises ValueError with a user-facing message when a split
+    # doesn't reconcile (percentages ≠ 100, exact shares ≠ amount, etc.).
+    try:
+        result = await add_expense(uow, cmd)
+    except ValueError as exc:
+        await message.reply(str(exc))
+        return
 
     major, minor = result.amount_cents // 100, result.amount_cents % 100
     payer_name = f"@{payer.username}" if payer.username else "you"

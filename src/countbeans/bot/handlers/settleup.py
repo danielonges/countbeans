@@ -70,7 +70,13 @@ async def cmd_settleup(message: Message, command: CommandObject, uow: UnitOfWork
         await message.reply(f"Invalid command: {exc}")
         return
 
-    result = await settle_up(uow, cmd)
+    # settle_up raises ValueError with a user-facing message when the settlement
+    # breaks a ledger rule (e.g. you owe nothing, or the recipient isn't owed).
+    try:
+        result = await settle_up(uow, cmd)
+    except ValueError as exc:
+        await message.reply(str(exc))
+        return
 
     major, minor = result.amount_cents // 100, result.amount_cents % 100
     await message.reply(
