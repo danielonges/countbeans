@@ -1,11 +1,21 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 
-from countbeans.bot.handlers import addexpense, balance, settleup, simplify, start
+from countbeans.bot.handlers import addexpense, balance, group, settleup, simplify, start
 from countbeans.bot.middleware import TransactionalMiddleware
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
+
+_COMMANDS = [
+    BotCommand(command="start",      description="Join the group and start tracking"),
+    BotCommand(command="addexpense", description="Record an expense"),
+    BotCommand(command="balance",    description="View your balance (or 'all' for everyone)"),
+    BotCommand(command="settleup",   description="Record a payment to another member"),
+    BotCommand(command="simplify",   description="View or toggle debt simplification (admin)"),
+    BotCommand(command="group",      description="Show group info and member list"),
+]
 
 
 async def run(token: str) -> None:
@@ -23,9 +33,11 @@ async def run(token: str) -> None:
     dp.include_router(addexpense.router)
     dp.include_router(balance.router)
     dp.include_router(simplify.router)
+    dp.include_router(group.router)
 
     bot = Bot(token=token)
     try:
+        await bot.set_my_commands(_COMMANDS)
         await dp.start_polling(bot)
     finally:
         await engine.dispose()
