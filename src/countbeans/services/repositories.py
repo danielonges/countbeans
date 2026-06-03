@@ -1,15 +1,35 @@
 """Repository classes — the only objects that hold SQLAlchemy models."""
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
 from countbeans.dto.domain import ActivitySummary, BalanceKey, BalanceMap, MemberInfo
 from countbeans.dto.results import SettlementCreatedResult
+
+
+@dataclass(slots=True)
+class RawStatementEntry:
+    """A ledger row carrying user *ids*, before the service resolves usernames.
+
+    Kept internal to the read path (not a DTO) so the public ``StatementEntry``
+    never has to expose surrogate ids the bot would only discard."""
+
+    kind: str  # "expense" | "settlement"
+    created_at: datetime
+    amount_cents: int
+    currency: str
+    description: str | None
+    actor_id: uuid.UUID            # expense payer / settlement sender
+    counterparty_id: uuid.UUID | None  # settlement recipient; None for expense
+    participant_count: int | None
+    voided: bool
 
 
 class SettlementRepository:
@@ -58,7 +78,7 @@ class ExpenseRepository:
             .group_by(Expense.currency)
         )
         return [
-            ActivitySummary(currency=cur, expense_count=count, total_cents=total)
+            ActivitySummary(currency=cur, expense_count=int(count), total_cents=int(total))
             for cur, count, total in rows
         ]
 
@@ -80,7 +100,7 @@ class BalanceRepository:
             .group_by(Expense.payer_id, Expense.currency)
         )
         for payer_id, currency, total in rows:
-            result[BalanceKey(payer_id, currency)] += total
+            result[BalanceKey(payer_id, currency)] += int(total)
 
         # 2. Share sums — money consumed
         rows = await self._session.execute(
@@ -90,7 +110,7 @@ class BalanceRepository:
             .group_by(ExpenseShare.user_id, Expense.currency)
         )
         for user_id, currency, total in rows:
-            result[BalanceKey(user_id, currency)] -= total
+            result[BalanceKey(user_id, currency)] -= int(total)
 
         # 3. Settlements sent — debtor reduces their balance
         rows = await self._session.execute(
@@ -99,7 +119,7 @@ class BalanceRepository:
             .group_by(Settlement.from_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
-            result[BalanceKey(user_id, currency)] += total
+            result[BalanceKey(user_id, currency)] += int(total)
 
         # 4. Settlements received — creditor balance is reduced
         rows = await self._session.execute(
@@ -108,7 +128,7 @@ class BalanceRepository:
             .group_by(Settlement.to_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
-            result[BalanceKey(user_id, currency)] -= total
+            result[BalanceKey(user_id, currency)] -= int(total)
 
         return {k: v for k, v in result.items() if v != 0}
 
@@ -119,6 +139,80 @@ class BalanceRepository:
             select(User.id, User.username).where(User.id.in_(user_ids))
         )
         return {row.id: row.username for row in rows}
+
+
+class StatementRepository:
+    """Reads the merged ledger (expenses + settlements) for /statements.
+
+    Spans both event tables, like BalanceRepository — but returns the raw rows
+    chronologically instead of aggregating. Scope is the whole group, or (when
+    ``user_id`` is given) only the entries that user is involved in: expenses
+    they paid or hold a share in, and settlements they sent or received.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_entries(
+        self, group_id: uuid.UUID, *, user_id: uuid.UUID | None = None
+    ) -> list[RawStatementEntry]:
+        """All ledger entries for the scope, newest first. Voided expenses are
+        included (and flagged) — a statement is an audit trail, unlike the
+        balance derivation which excludes them."""
+        exp_q = select(Expense).where(Expense.group_id == group_id)
+        if user_id is not None:
+            shared = select(ExpenseShare.expense_id).where(ExpenseShare.user_id == user_id)
+            exp_q = exp_q.where(or_(Expense.payer_id == user_id, Expense.id.in_(shared)))
+        expenses = (await self._session.execute(exp_q)).scalars().all()
+
+        # Participant counts in one grouped pass over the relevant expenses.
+        counts: dict[uuid.UUID, int] = {}
+        if expenses:
+            rows = await self._session.execute(
+                select(ExpenseShare.expense_id, func.count())
+                .where(ExpenseShare.expense_id.in_([e.id for e in expenses]))
+                .group_by(ExpenseShare.expense_id)
+            )
+            counts = {eid: int(c) for eid, c in rows}
+
+        entries = [
+            RawStatementEntry(
+                kind="expense",
+                created_at=e.created_at,
+                amount_cents=e.amount_cents,
+                currency=e.currency,
+                description=e.description,
+                actor_id=e.payer_id,
+                counterparty_id=None,
+                participant_count=counts.get(e.id, 0),
+                voided=e.voided_at is not None,
+            )
+            for e in expenses
+        ]
+
+        set_q = select(Settlement).where(Settlement.group_id == group_id)
+        if user_id is not None:
+            set_q = set_q.where(
+                or_(Settlement.from_user_id == user_id, Settlement.to_user_id == user_id)
+            )
+        settlements = (await self._session.execute(set_q)).scalars().all()
+        entries.extend(
+            RawStatementEntry(
+                kind="settlement",
+                created_at=s.created_at,
+                amount_cents=s.amount_cents,
+                currency=s.currency,
+                description=None,
+                actor_id=s.from_user_id,
+                counterparty_id=s.to_user_id,
+                participant_count=None,
+                voided=False,
+            )
+            for s in settlements
+        )
+
+        entries.sort(key=lambda e: e.created_at, reverse=True)
+        return entries
 
 
 class UserRepository:

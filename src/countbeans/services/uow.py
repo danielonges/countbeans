@@ -7,6 +7,7 @@ from .repositories import (
     GroupMemberRepository,
     GroupRepository,
     SettlementRepository,
+    StatementRepository,
     UserRepository,
 )
 
@@ -22,6 +23,7 @@ class UnitOfWork:
         self.settlements = SettlementRepository(self._session)
         self.expenses = ExpenseRepository(self._session)
         self.balances = BalanceRepository(self._session)
+        self.ledger = StatementRepository(self._session)
         self.users = UserRepository(self._session)
         self.groups = GroupRepository(self._session)
         self.group_members = GroupMemberRepository(self._session)

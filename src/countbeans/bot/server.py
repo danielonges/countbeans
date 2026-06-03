@@ -3,7 +3,16 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
-from countbeans.bot.handlers import addexpense, balance, currency, group, settleup, simplify, start
+from countbeans.bot.handlers import (
+    addexpense,
+    balance,
+    currency,
+    group,
+    settleup,
+    simplify,
+    start,
+    statements,
+)
 from countbeans.bot.middleware import TransactionalMiddleware
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
@@ -15,6 +24,7 @@ _COMMANDS = [
     BotCommand(command="settleup",   description="Record a payment to another member"),
     BotCommand(command="simplify",   description="View or toggle debt simplification (admin)"),
     BotCommand(command="currency",   description="View or set the group's default currency (admin)"),
+    BotCommand(command="statements", description="List the ledger ('me' for just yours)"),
     BotCommand(command="group",      description="Show group info and member list"),
 ]
 
@@ -28,13 +38,17 @@ async def run(token: str) -> None:
         return UnitOfWork(session_factory)
 
     dp = Dispatcher()
+    # /statements paging arrives as callback queries, so the UoW middleware must
+    # cover both update types — the callback handler issues reads too.
     dp.message.middleware(TransactionalMiddleware(uow_factory))
+    dp.callback_query.middleware(TransactionalMiddleware(uow_factory))
     dp.include_router(start.router)
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
     dp.include_router(balance.router)
     dp.include_router(simplify.router)
     dp.include_router(currency.router)
+    dp.include_router(statements.router)
     dp.include_router(group.router)
 
     bot = Bot(token=token)

@@ -1,6 +1,7 @@
 """Read-side domain DTOs for balance and group queries."""
 import uuid
-from typing import NamedTuple
+from datetime import datetime
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
@@ -76,3 +77,35 @@ class GroupInfo(BaseModel):
     known_count: int                  # len(members)
     actual_count: int | None          # from getChatMemberCount - 1; None if unavailable
     activity: list[ActivitySummary]   # per-currency active expense totals
+
+
+class StatementEntry(BaseModel):
+    """One line in a chronological ledger statement — an expense or a settlement.
+
+    A discriminated shape: ``kind`` selects which optional fields are populated.
+    For an expense, ``actor`` is the payer and ``counterparty`` is None; for a
+    settlement, ``actor`` pays ``counterparty``. Money stays integer cents.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["expense", "settlement"]
+    created_at: datetime
+    amount_cents: int
+    currency: str
+    description: str | None            # expense only
+    actor_username: str | None         # expense payer / settlement sender
+    counterparty_username: str | None  # settlement recipient; None for expense
+    participant_count: int | None      # expense only
+    voided: bool                       # expense only; always False for settlements
+
+
+class StatementPage(BaseModel):
+    """A slice of a statement plus the cursor needed to render paging controls."""
+
+    model_config = ConfigDict(frozen=True)
+
+    entries: list[StatementEntry]
+    page: int        # 0-indexed
+    page_size: int
+    total: int       # entries across every page (for the page count + Prev/Next)
