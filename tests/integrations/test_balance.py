@@ -10,7 +10,7 @@ import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instan
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
-from countbeans.dto.domain import Transfer
+from countbeans.dto.domain import BalanceKey, BalanceMap, Transfer
 from countbeans.services.balance import compute_balances, get_group_summary
 from countbeans.services.repositories import BalanceRepository, GroupRepository, UserRepository
 
@@ -22,18 +22,14 @@ class _SessionUoW:
         self.groups = GroupRepository(session)
 
 
-def _settles(
-    balances: dict[tuple[uuid.UUID, str], int], transfers: list[Transfer]
-) -> bool:
+def _settles(balances: BalanceMap, transfers: list[Transfer]) -> bool:
     """True iff applying the transfers drives every balance to zero."""
     net = dict(balances)
     for t in transfers:
-        net[(t.from_user_id, t.currency)] = (
-            net.get((t.from_user_id, t.currency), 0) + t.amount_cents
-        )
-        net[(t.to_user_id, t.currency)] = (
-            net.get((t.to_user_id, t.currency), 0) - t.amount_cents
-        )
+        from_key = BalanceKey(t.from_user_id, t.currency)
+        to_key = BalanceKey(t.to_user_id, t.currency)
+        net[from_key] = net.get(from_key, 0) + t.amount_cents
+        net[to_key] = net.get(to_key, 0) - t.amount_cents
     return all(v == 0 for v in net.values())
 
 
@@ -100,8 +96,8 @@ async def test_single_expense_balances(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
     raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
 
-    assert raw[(alice.id, "SGD")] == 50   # +100 fronted − 50 share
-    assert raw[(bob.id, "SGD")] == -50
+    assert raw[BalanceKey(alice.id, "SGD")] == 50   # +100 fronted − 50 share
+    assert raw[BalanceKey(bob.id, "SGD")] == -50
     assert sum(raw.values()) == 0
 
 

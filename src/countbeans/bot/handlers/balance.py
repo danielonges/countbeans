@@ -65,7 +65,9 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
         await message.reply("\n".join(lines))
     else:
         raw = await compute_balances(uow, group.id)
-        my_balances = {cur: cents for (uid, cur), cents in raw.items() if uid == caller.id}
+        my_balances = {
+            key.currency: cents for key, cents in raw.items() if key.user_id == caller.id
+        }
 
         if not my_balances:
             await message.reply("You have no outstanding balances in this group.")

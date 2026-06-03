@@ -1,7 +1,25 @@
 """Read-side domain DTOs for balance queries."""
 import uuid
+from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
+
+
+class BalanceKey(NamedTuple):
+    """Composite key for a derived balance: one net figure per (user, currency).
+
+    A NamedTuple rather than a Pydantic model — it is used as a dict key, so it
+    must be cheaply hashable, and it still unpacks like the ``(uid, cur)`` tuple
+    it replaces (so an equal plain tuple indexes the same entry).
+    """
+
+    user_id: uuid.UUID
+    currency: str
+
+
+# Net cents keyed by (user, currency); positive = the group owes the user.
+# Zero balances are omitted by the repository that builds it.
+type BalanceMap = dict[BalanceKey, int]
 
 
 class MemberBalance(BaseModel):

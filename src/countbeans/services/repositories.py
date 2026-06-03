@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.dto.domain import BalanceKey, BalanceMap
 from countbeans.dto.results import SettlementCreatedResult
 
 
@@ -56,11 +57,9 @@ class BalanceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def compute_for_group(
-        self, group_id: uuid.UUID
-    ) -> dict[tuple[uuid.UUID, str], int]:
-        """Return {(user_id, currency): net_cents}. Zero balances are omitted."""
-        result: dict[tuple[uuid.UUID, str], int] = defaultdict(int)
+    async def compute_for_group(self, group_id: uuid.UUID) -> BalanceMap:
+        """Return {BalanceKey(user_id, currency): net_cents}. Zero balances are omitted."""
+        result: BalanceMap = defaultdict(int)
 
         # 1. Payer sums — money fronted
         rows = await self._session.execute(
@@ -69,7 +68,7 @@ class BalanceRepository:
             .group_by(Expense.payer_id, Expense.currency)
         )
         for payer_id, currency, total in rows:
-            result[(payer_id, currency)] += total
+            result[BalanceKey(payer_id, currency)] += total
 
         # 2. Share sums — money consumed
         rows = await self._session.execute(
@@ -79,7 +78,7 @@ class BalanceRepository:
             .group_by(ExpenseShare.user_id, Expense.currency)
         )
         for user_id, currency, total in rows:
-            result[(user_id, currency)] -= total
+            result[BalanceKey(user_id, currency)] -= total
 
         # 3. Settlements sent — debtor reduces their balance
         rows = await self._session.execute(
@@ -88,7 +87,7 @@ class BalanceRepository:
             .group_by(Settlement.from_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
-            result[(user_id, currency)] += total
+            result[BalanceKey(user_id, currency)] += total
 
         # 4. Settlements received — creditor balance is reduced
         rows = await self._session.execute(
@@ -97,7 +96,7 @@ class BalanceRepository:
             .group_by(Settlement.to_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
-            result[(user_id, currency)] -= total
+            result[BalanceKey(user_id, currency)] -= total
 
         return {k: v for k, v in result.items() if v != 0}
 
