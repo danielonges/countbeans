@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
 
 from countbeans.bot.handlers import addexpense, balance, group, settleup, simplify, start
 from countbeans.bot.middleware import TransactionalMiddleware
@@ -37,7 +37,11 @@ async def run(token: str) -> None:
 
     bot = Bot(token=token)
     try:
-        await bot.set_my_commands(_COMMANDS)
+        await bot.set_my_commands(
+            [BotCommand(command="start", description="Add me to a group to start tracking expenses")],
+            scope=BotCommandScopeAllPrivateChats(),
+        )
+        await bot.set_my_commands(_COMMANDS, scope=BotCommandScopeAllGroupChats())
         await dp.start_polling(bot)
     finally:
         await engine.dispose()
