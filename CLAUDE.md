@@ -76,9 +76,25 @@ docker compose run --rm \
   migrate uv run alembic revision --autogenerate -m "describe change"
 ```
 
+> **Rebuild the image before autogenerating, and again before applying a
+> brand-new migration.** The image bakes `src/` (and `alembic/`) at build time;
+> the commands above bind-mount only `alembic/`, never `src/`. So after editing
+> a model, run `docker compose build migrate` first — otherwise autogenerate
+> diffs against the *stale baked models* and silently emits an **empty**
+> migration (no error, just `pass`). Likewise, the plain `migrate` apply,
+> `alembic check`, and the round-trip below don't bind-mount `alembic/`, so they
+> won't see a migration file you just wrote until you `docker compose build
+> migrate` to bake it in (this is also what production does — the deploy image
+> ships migrations baked). A quick `... python -c "from countbeans.db import
+> models, _base; print(_base.Base.metadata.tables['<table>'].indexes)"` in the
+> container confirms it sees your change.
+
 Then review the generated file in `alembic/versions/`, apply it with
 `docker compose run --rm migrate`, and commit it. `alembic check` (no pending
 ops) and a `downgrade base` → `upgrade head` round-trip are good sanity checks.
+**Partial indexes** (e.g. `postgresql_where=`) autogenerate fine *once the image
+is rebuilt* — an empty diff there is the staleness trap above, not an Alembic
+limitation.
 
 - **Constraint naming:** `Base.metadata` carries a `naming_convention` (see
   `src/countbeans/db/_base.py`), so every PK/FK/unique/check/index gets a
