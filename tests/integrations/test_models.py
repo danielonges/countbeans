@@ -73,6 +73,26 @@ async def test_user_telegram_user_id_unique(session: AsyncSession) -> None:
         await session.flush()
 
 
+async def test_user_pending_placeholder_username_unique(session: AsyncSession) -> None:
+    # The partial unique index enforces at most one PENDING placeholder
+    # (telegram_user_id IS NULL) per username.
+    session.add_all([_user(username="bob"), _user(username="bob")])
+    with pytest.raises(IntegrityError):
+        await session.flush()
+
+
+async def test_user_claimed_and_placeholder_may_share_username(session: AsyncSession) -> None:
+    # The index is partial, so it constrains only placeholders: a claimed user
+    # and a placeholder (or two claimed users) may share a username across a
+    # rename/reuse without violating it.
+    session.add_all([
+        _user(username="carol", telegram_user_id=1),
+        _user(username="carol"),  # pending placeholder, same handle
+        _user(username="carol", telegram_user_id=2),
+    ])
+    await session.flush()  # must not raise
+
+
 # --- Group ---
 
 async def test_group_simplify_debts_defaults_true(session: AsyncSession) -> None:

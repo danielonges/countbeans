@@ -2,7 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,6 +26,21 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     username: Mapped[Optional[str]] = mapped_column(String(255))
     first_name: Mapped[Optional[str]] = mapped_column(String(255))
     last_name: Mapped[Optional[str]] = mapped_column(String(255))
+
+    __table_args__ = (
+        # App invariant: at most one PENDING placeholder (telegram_user_id IS
+        # NULL) per username, so resolve_mention reuses a single placeholder per
+        # handle and claiming stays unambiguous. Partial — it constrains only
+        # placeholders; claimed rows may freely share a username across a
+        # rename/reuse (cf. uq_events_one_open_per_group). See CLAUDE.md
+        # "Onboarding & membership".
+        Index(
+            "uq_users_pending_placeholder_username",
+            "username",
+            unique=True,
+            postgresql_where=text("telegram_user_id IS NULL"),
+        ),
+    )
 
 
 class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
