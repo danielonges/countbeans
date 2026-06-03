@@ -26,7 +26,7 @@ _GROUP_WELCOME = (
     '• /addexpense <amount> "<desc>" [@user …] — record an expense\n'
     "• /balance [all] — your net position, or every member's with /balance all\n"
     "• /settleup @user <amount> — record a payment (full or partial)\n"
-    "• /statements [me] — browse the ledger (whole group, or just yours)\n"
+    "• /statements [all] — your transactions, or the whole group's with /statements all\n"
     "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
     "• /currency [CODE] — view or (admins) set the group's default currency\n"
     "• /group — group info, members, and activity\n"

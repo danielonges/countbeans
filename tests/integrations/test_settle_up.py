@@ -116,7 +116,7 @@ async def test_settle_up_records_settlement(session: AsyncSession) -> None:
     await _add_expense(session, group, payee, [payer, payee], amount_cents=2000)
     uow = _SessionUoW(session)
 
-    result = await settle_up(uow, _cmd(group, payer, payee))
+    result = await settle_up(uow, _cmd(group, payer, payee))  # type: ignore[arg-type]
 
     stmt = select(Settlement).where(Settlement.id == result.settlement_id)
     db_row = (await session.execute(stmt)).scalar_one_or_none()
@@ -133,7 +133,7 @@ async def test_settle_up_returns_correct_result(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
     cmd = _cmd(group, payer, payee, amount_cents=2500, currency="SGD")
 
-    result = await settle_up(uow, cmd)
+    result = await settle_up(uow, cmd)  # type: ignore[arg-type]
 
     assert result.from_user_id == payer.id
     assert result.to_user_id == payee.id
@@ -162,9 +162,9 @@ async def test_multiple_settlements_independent(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
 
     # bob pays alice partially
-    r1 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=1000))
+    r1 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=1000))  # type: ignore[arg-type]
     # bob still owes alice 500 more (share was 1500, paid 1000)
-    r2 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=500))
+    r2 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=500))  # type: ignore[arg-type]
 
     assert r1.settlement_id != r2.settlement_id
 
@@ -190,7 +190,7 @@ async def test_settle_up_payer_has_no_debt_rejected(session: AsyncSession) -> No
 
     # alice tries to pay bob even though alice is owed money
     with pytest.raises(ValueError, match="don't owe anyone"):
-        await settle_up(uow, _cmd(group, alice, bob))
+        await settle_up(uow, _cmd(group, alice, bob))  # type: ignore[arg-type]
 
 
 async def test_settle_up_recipient_not_owed_rejected(session: AsyncSession) -> None:
@@ -202,4 +202,4 @@ async def test_settle_up_recipient_not_owed_rejected(session: AsyncSession) -> N
 
     # bob owes alice, but tries to pay charlie (who is owed nothing)
     with pytest.raises(ValueError, match="not owed any"):
-        await settle_up(uow, _cmd(group, bob, charlie))
+        await settle_up(uow, _cmd(group, bob, charlie))  # type: ignore[arg-type]

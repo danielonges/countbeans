@@ -78,7 +78,7 @@ async def cmd_statements(message: Message, uow: UnitOfWork) -> None:
         return
 
     parts = (message.text or "").split()
-    personal = len(parts) > 1 and parts[1].lower() in ("me", "mine")
+    group_wide = len(parts) > 1 and parts[1].lower() == "all"
 
     caller = await uow.users.upsert(
         telegram_user_id=message.from_user.id,
@@ -91,12 +91,12 @@ async def cmd_statements(message: Message, uow: UnitOfWork) -> None:
         group_name=getattr(message.chat, "title", None),
     )
 
-    if personal:
-        page = await get_statement_page(uow, group.id, user_id=caller.id, page=0)
-        title, cb_prefix = "📋 Your statement", f"stmt:u:{message.from_user.id}"
-    else:
+    if group_wide:
         page = await get_statement_page(uow, group.id, page=0)
         title, cb_prefix = "📋 Group statement", "stmt:g"
+    else:
+        page = await get_statement_page(uow, group.id, user_id=caller.id, page=0)
+        title, cb_prefix = "📋 Your statement", f"stmt:u:{message.from_user.id}"
 
     await message.reply(_render(page, title), reply_markup=_keyboard(page, cb_prefix))
 

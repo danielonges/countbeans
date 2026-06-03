@@ -24,7 +24,7 @@ _COMMANDS = [
     BotCommand(command="settleup",   description="Record a payment to another member"),
     BotCommand(command="simplify",   description="View or toggle debt simplification (admin)"),
     BotCommand(command="currency",   description="View or set the group's default currency (admin)"),
-    BotCommand(command="statements", description="List the ledger ('me' for just yours)"),
+    BotCommand(command="statements", description="Your transactions ('all' for the whole group)"),
     BotCommand(command="group",      description="Show group info and member list"),
 ]
 
