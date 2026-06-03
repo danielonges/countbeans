@@ -243,6 +243,15 @@ class GroupRepository:
             .values(simplify_debts=simplify_debts)
         )
 
+    async def set_default_currency(
+        self, group_id: uuid.UUID, default_currency: str
+    ) -> None:
+        await self._session.execute(
+            update(Group)
+            .where(Group.id == group_id)
+            .values(default_currency=default_currency)
+        )
+
 
 class GroupMemberRepository:
     def __init__(self, session: AsyncSession) -> None:

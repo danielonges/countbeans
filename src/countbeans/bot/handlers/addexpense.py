@@ -9,7 +9,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.parsing import parse_amount_cents
+from countbeans.bot.parsing import parse_money
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense
 from countbeans.services.uow import UnitOfWork
@@ -18,8 +18,13 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-_AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _MENTION_RE = re.compile(r"@([\w.]+)")
+_USAGE = (
+    'Usage: /addexpense <amount> ["description"] [@user1 @user2 ...]\n'
+    'Example: /addexpense 25.50 "Dinner" @alice @bob\n'
+    "Prefix the amount with a currency to override the group default: "
+    "$50, €50, USD50."
+)
 
 
 @router.message(Command("addexpense"))
@@ -30,16 +35,26 @@ async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
     text = re.sub(r"^/addexpense\s*", "", message.text.strip(), flags=re.IGNORECASE)
     tokens = text.split()
 
-    if not tokens or not _AMOUNT_RE.match(tokens[0]):
-        await message.reply(
-            'Usage: /addexpense <amount> ["description"] [@user1 @user2 ...]\n'
-            'Example: /addexpense 25.50 "Dinner" @alice @bob'
-        )
+    if not tokens:
+        await message.reply(_USAGE)
         return
 
-    amount_str = tokens[0]
+    payer = await uow.users.upsert(
+        telegram_user_id=message.from_user.id,
+        username=message.from_user.username,
+        first_name=message.from_user.first_name,
+        last_name=message.from_user.last_name,
+    )
+    group = await uow.groups.upsert(
+        telegram_chat_id=message.chat.id,
+        group_name=getattr(message.chat, "title", None),
+    )
+
+    # The amount token may carry a currency marker ($50, €50, USD50); resolve it
+    # against the group default. Mixed currencies are fine — balances derive
+    # per-currency (see CLAUDE.md "Deriving balances").
     try:
-        amount_cents = parse_amount_cents(amount_str)
+        currency, amount_cents = parse_money(tokens[0], group.default_currency)
     except ValueError:
         await message.reply("Invalid amount. Use a positive number like 25.50")
         return
@@ -54,17 +69,6 @@ async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
         rest = rest[: quoted.start()] + rest[quoted.end() :]
 
     mentions = _MENTION_RE.findall(rest)
-
-    payer = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-    )
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
 
     participant_users = [payer]
     seen_ids = {payer.id}
@@ -84,7 +88,7 @@ async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
             group_id=group.id,
             payer_id=payer.id,
             amount_cents=amount_cents,
-            currency=group.default_currency,
+            currency=currency,
             description=description,
             participants=[u.id for u in participant_users],
             created_by=payer.id,
