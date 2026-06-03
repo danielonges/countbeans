@@ -9,6 +9,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.parsing import parse_amount_cents
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense
 from countbeans.services.uow import UnitOfWork
@@ -19,19 +20,6 @@ router = Router()
 
 _AMOUNT_RE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _MENTION_RE = re.compile(r"@([\w.]+)")
-
-
-def _parse_amount_cents(s: str) -> int:
-    """Parse a decimal string (max 2 dp) to integer cents without using float."""
-    if "." in s:
-        integer_part, decimal_part = s.split(".", 1)
-        decimal_part = decimal_part.ljust(2, "0")[:2]
-    else:
-        integer_part, decimal_part = s, "00"
-    cents = int(integer_part) * 100 + int(decimal_part)
-    if cents <= 0:
-        raise ValueError("amount must be positive")
-    return cents
 
 
 @router.message(Command("addexpense"))
@@ -51,7 +39,7 @@ async def cmd_addexpense(message: Message, uow: UnitOfWork) -> None:
 
     amount_str = tokens[0]
     try:
-        amount_cents = _parse_amount_cents(amount_str)
+        amount_cents = parse_amount_cents(amount_str)
     except ValueError:
         await message.reply("Invalid amount. Use a positive number like 25.50")
         return

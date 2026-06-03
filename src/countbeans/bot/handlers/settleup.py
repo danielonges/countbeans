@@ -9,6 +9,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.parsing import parse_amount_cents
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.settlement import settle_up
 from countbeans.services.uow import UnitOfWork
@@ -23,19 +24,6 @@ _COMMAND_RE = re.compile(
     r"^/settleup\s+@([\w.]+)\s+(\d+(?:\.\d{1,2})?)$",
     re.IGNORECASE,
 )
-
-
-def _parse_amount_cents(amount_str: str) -> int:
-    """Parse a decimal string (max 2 dp) into integer cents without using float."""
-    if "." in amount_str:
-        integer_part, decimal_part = amount_str.split(".")
-        decimal_part = decimal_part.ljust(2, "0")[:2]
-    else:
-        integer_part, decimal_part = amount_str, "00"
-    cents = int(integer_part) * 100 + int(decimal_part)
-    if cents <= 0:
-        raise ValueError("Amount must be positive")
-    return cents
 
 
 @router.message(Command("settleup"))
@@ -54,7 +42,7 @@ async def cmd_settleup(message: Message, uow: UnitOfWork) -> None:
     target_username, amount_str = match.group(1), match.group(2)
 
     try:
-        amount_cents = _parse_amount_cents(amount_str)
+        amount_cents = parse_amount_cents(amount_str)
     except ValueError:
         await message.reply("Invalid amount. Please use a positive number, e.g. 25.50")
         return
