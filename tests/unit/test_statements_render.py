@@ -1,42 +1,43 @@
 """Unit tests for /statements rendering and pagination-keyboard logic."""
 from datetime import datetime, timezone
+from typing import Any
 
 from countbeans.bot.handlers.statements import _entry_lines, _keyboard, _render
 from countbeans.dto.domain import StatementEntry, StatementPage
 
 _WHEN = datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc)
 
+_EXPENSE = StatementEntry(
+    kind="expense",
+    created_at=_WHEN,
+    amount_cents=2550,
+    currency="SGD",
+    description="Dinner",
+    actor_username="alice",
+    counterparty_username=None,
+    participant_count=3,
+    voided=False,
+)
 
-def _expense(**over) -> StatementEntry:
-    base = dict(
-        kind="expense",
-        created_at=_WHEN,
-        amount_cents=2550,
-        currency="SGD",
-        description="Dinner",
-        actor_username="alice",
-        counterparty_username=None,
-        participant_count=3,
-        voided=False,
-    )
-    base.update(over)
-    return StatementEntry(**base)
+_SETTLEMENT = StatementEntry(
+    kind="settlement",
+    created_at=_WHEN,
+    amount_cents=1000,
+    currency="SGD",
+    description=None,
+    actor_username="bob",
+    counterparty_username="alice",
+    participant_count=None,
+    voided=False,
+)
 
 
-def _settlement(**over) -> StatementEntry:
-    base = dict(
-        kind="settlement",
-        created_at=_WHEN,
-        amount_cents=1000,
-        currency="SGD",
-        description=None,
-        actor_username="bob",
-        counterparty_username="alice",
-        participant_count=None,
-        voided=False,
-    )
-    base.update(over)
-    return StatementEntry(**base)
+def _expense(**over: Any) -> StatementEntry:
+    return _EXPENSE.model_copy(update=over)
+
+
+def _settlement(**over: Any) -> StatementEntry:
+    return _SETTLEMENT.model_copy(update=over)
 
 
 def _page(entries, page=0, page_size=8, total=None) -> StatementPage:
@@ -85,6 +86,7 @@ def test_render_header_has_page_and_total():
 
 def test_keyboard_first_page_has_only_next():
     kb = _keyboard(_page([_expense()], page=0, page_size=8, total=20), "stmt:g")
+    assert kb is not None
     buttons = kb.inline_keyboard[0]
     assert [b.text for b in buttons] == ["Next ▶"]
     assert buttons[0].callback_data == "stmt:g:1"
@@ -92,6 +94,7 @@ def test_keyboard_first_page_has_only_next():
 
 def test_keyboard_last_page_has_only_prev():
     kb = _keyboard(_page([_expense()], page=2, page_size=8, total=20), "stmt:g")
+    assert kb is not None
     buttons = kb.inline_keyboard[0]
     assert [b.text for b in buttons] == ["◀ Prev"]
     assert buttons[0].callback_data == "stmt:g:1"
@@ -99,6 +102,7 @@ def test_keyboard_last_page_has_only_prev():
 
 def test_keyboard_middle_page_has_both():
     kb = _keyboard(_page([_expense()], page=1, page_size=8, total=20), "stmt:u:42")
+    assert kb is not None
     buttons = kb.inline_keyboard[0]
     assert [b.text for b in buttons] == ["◀ Prev", "Next ▶"]
     assert buttons[0].callback_data == "stmt:u:42:0"

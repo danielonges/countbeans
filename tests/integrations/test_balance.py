@@ -3,7 +3,6 @@
 Uses an ephemeral Postgres container (Testcontainers via conftest.py).
 Each test rolls back via the session fixture.
 """
-import uuid
 from datetime import datetime, timezone
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances

@@ -3,6 +3,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy import func, or_, select, update
@@ -21,7 +22,7 @@ class RawStatementEntry:
     Kept internal to the read path (not a DTO) so the public ``StatementEntry``
     never has to expose surrogate ids the bot would only discard."""
 
-    kind: str  # "expense" | "settlement"
+    kind: Literal["expense", "settlement"]
     created_at: datetime
     amount_cents: int
     currency: str

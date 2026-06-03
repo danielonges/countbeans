@@ -107,7 +107,9 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
     # stmt:g:<page>  |  stmt:u:<tg_id>:<page>
     scope = parts[1] if len(parts) > 1 else ""
 
-    if callback.message is None:
+    # Narrow to a live Message: an InaccessibleMessage (too old to edit) has no
+    # edit_text, and there's nothing to repaint anyway.
+    if not isinstance(callback.message, Message):
         await callback.answer()
         return
 
