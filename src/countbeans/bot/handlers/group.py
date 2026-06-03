@@ -50,7 +50,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
 
     # Header
     name = info.group_name or "This group"
-    lines.append(f"*{name}*")
+    lines.append(name)
     lines.append(f"Currency: {info.default_currency}")
     simplify_label = "on" if info.simplify_debts else "off"
     lines.append(f"Debt simplification: {simplify_label}")
@@ -60,7 +60,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     claimed = [m for m in info.members if not m.is_pending]
     pending = [m for m in info.members if m.is_pending]
 
-    lines.append(f"*Members ({info.known_count}):*")
+    lines.append(f"Members ({info.known_count}):")
     if claimed:
         for m in claimed:
             handle = f"@{m.username}" if m.username else m.first_name or str(m.user_id)
@@ -85,7 +85,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     # Activity
     if info.activity:
         lines.append("")
-        lines.append("*Activity:*")
+        lines.append("Activity:")
         for a in sorted(info.activity, key=lambda x: x.currency):
             total = f"{a.total_cents // 100}.{a.total_cents % 100:02d}"
             lines.append(f"  {a.expense_count} expense(s) · {a.currency} {total} total")
@@ -93,4 +93,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         lines.append("")
         lines.append("No expenses recorded yet.")
 
-    await message.reply("\n".join(lines), parse_mode="Markdown")
+    # Plain text on purpose: @usernames, group names, and first names are
+    # free text that would mangle (or 400) under Markdown parsing — same reason
+    # /statements stays plain.
+    await message.reply("\n".join(lines))
