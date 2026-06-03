@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
-from countbeans.dto.domain import BalanceKey, BalanceMap
+from countbeans.dto.domain import ActivitySummary, BalanceKey, BalanceMap, MemberInfo
 from countbeans.dto.results import SettlementCreatedResult
 
 
@@ -49,6 +49,18 @@ class ExpenseRepository:
             for uid, cents in shares.items()
         ])
         await self._session.flush()
+
+    async def activity_summary(self, group_id: uuid.UUID) -> list[ActivitySummary]:
+        """Active (non-voided) expense count and total per currency for a group."""
+        rows = await self._session.execute(
+            select(Expense.currency, func.count(), func.sum(Expense.amount_cents))
+            .where(Expense.group_id == group_id, Expense.voided_at.is_(None))
+            .group_by(Expense.currency)
+        )
+        return [
+            ActivitySummary(currency=cur, expense_count=count, total_cents=total)
+            for cur, count, total in rows
+        ]
 
 
 class BalanceRepository:
@@ -235,6 +247,24 @@ class GroupRepository:
 class GroupMemberRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def list_members(self, group_id: uuid.UUID) -> list[MemberInfo]:
+        """Active (left_at IS NULL) members with their user info."""
+        rows = await self._session.execute(
+            select(User)
+            .join(GroupMember, GroupMember.user_id == User.id)
+            .where(GroupMember.group_id == group_id, GroupMember.left_at.is_(None))
+            .order_by(User.username)
+        )
+        return [
+            MemberInfo(
+                user_id=u.id,
+                username=u.username,
+                first_name=u.first_name,
+                is_pending=u.telegram_user_id is None,
+            )
+            for u in rows.scalars()
+        ]
 
     async def ensure_member(self, group_id: uuid.UUID, user_id: uuid.UUID) -> None:
         result = await self._session.execute(

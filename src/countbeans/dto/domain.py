@@ -1,4 +1,4 @@
-"""Read-side domain DTOs for balance queries."""
+"""Read-side domain DTOs for balance and group queries."""
 import uuid
 from typing import NamedTuple
 
@@ -46,3 +46,33 @@ class GroupSummary(BaseModel):
     group_id: uuid.UUID
     balances: list[MemberBalance]
     suggested_transfers: list[Transfer]
+
+
+class MemberInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    user_id: uuid.UUID
+    username: str | None
+    first_name: str | None
+    is_pending: bool  # True = placeholder, telegram_user_id IS NULL
+
+
+class ActivitySummary(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    currency: str
+    expense_count: int
+    total_cents: int
+
+
+class GroupInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    group_id: uuid.UUID
+    group_name: str | None
+    default_currency: str
+    simplify_debts: bool
+    members: list[MemberInfo]         # active group_members, placeholders flagged
+    known_count: int                  # len(members)
+    actual_count: int | None          # from getChatMemberCount - 1; None if unavailable
+    activity: list[ActivitySummary]   # per-currency active expense totals
