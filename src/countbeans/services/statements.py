@@ -36,22 +36,28 @@ async def get_statement_page(
         ids.add(e.actor_id)
         if e.counterparty_id is not None:
             ids.add(e.counterparty_id)
-    names = await uow.balances.get_usernames(ids)
+    labels = await uow.balances.get_display_names(ids)  # {id: (username, first_name)}
 
-    entries = [
-        StatementEntry(
-            kind=e.kind,
-            created_at=e.created_at,
-            amount_cents=e.amount_cents,
-            currency=e.currency,
-            description=e.description,
-            actor_username=names.get(e.actor_id),
-            counterparty_username=(
-                names.get(e.counterparty_id) if e.counterparty_id is not None else None
-            ),
-            participant_count=e.participant_count,
-            voided=e.voided,
+    def label(uid: uuid.UUID | None) -> tuple[str | None, str | None]:
+        return labels.get(uid, (None, None)) if uid is not None else (None, None)
+
+    entries = []
+    for e in window:
+        actor_username, actor_first_name = label(e.actor_id)
+        cp_username, cp_first_name = label(e.counterparty_id)
+        entries.append(
+            StatementEntry(
+                kind=e.kind,
+                created_at=e.created_at,
+                amount_cents=e.amount_cents,
+                currency=e.currency,
+                description=e.description,
+                actor_username=actor_username,
+                actor_first_name=actor_first_name,
+                counterparty_username=cp_username,
+                counterparty_first_name=cp_first_name,
+                participant_count=e.participant_count,
+                voided=e.voided,
+            )
         )
-        for e in window
-    ]
     return StatementPage(entries=entries, page=page, page_size=page_size, total=total)

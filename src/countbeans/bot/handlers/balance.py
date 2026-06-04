@@ -6,7 +6,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.dto.domain import MemberBalance
+from countbeans.bot.formatting import display_name
 from countbeans.services.balance import get_group_summary
 from countbeans.services.uow import UnitOfWork
 
@@ -23,15 +23,6 @@ def _fmt(cents: int, currency: str) -> str:
 
 def _amount(cents: int, currency: str) -> str:
     return f"{currency} {cents // 100}.{cents % 100:02d}"
-
-
-def _display(member: MemberBalance) -> str:
-    """Prefer the @handle, fall back to a first name, never surface a raw UUID."""
-    if member.username:
-        return f"@{member.username}"
-    if member.first_name:
-        return member.first_name
-    return "someone"
 
 
 @router.message(Command("balance"))
@@ -55,7 +46,9 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     show_all = len(parts) > 1 and parts[1].lower() == "all"
 
     summary = await get_group_summary(uow, group.id, group.simplify_debts)
-    display_by_id: dict[uuid.UUID, str] = {b.user_id: _display(b) for b in summary.balances}
+    display_by_id: dict[uuid.UUID, str] = {
+        b.user_id: display_name(b.username, b.first_name) for b in summary.balances
+    }
 
     if show_all:
         if not summary.balances:

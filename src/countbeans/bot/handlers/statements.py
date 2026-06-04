@@ -23,6 +23,7 @@ from aiogram.types import (
     Message,
 )
 
+from countbeans.bot.formatting import display_name
 from countbeans.dto.domain import StatementEntry, StatementPage
 from countbeans.services.statements import get_statement_page
 from countbeans.services.uow import UnitOfWork
@@ -38,8 +39,8 @@ def _money(cents: int, currency: str) -> str:
 
 def _entry_lines(e: StatementEntry) -> str:
     when = e.created_at.strftime("%b %d %H:%M")
+    actor = display_name(e.actor_username, e.actor_first_name)
     if e.kind == "expense":
-        actor = f"@{e.actor_username}" if e.actor_username else "someone"
         head = f"🧾 {when} · {e.description or 'expense'} — {_money(e.amount_cents, e.currency)}"
         if e.voided:
             head = f"❌ {head} (voided)"
@@ -47,8 +48,7 @@ def _entry_lines(e: StatementEntry) -> str:
         if e.participant_count:
             sub += f" · split {e.participant_count}-way"
         return f"{head}\n{sub}"
-    actor = f"@{e.actor_username}" if e.actor_username else "someone"
-    other = f"@{e.counterparty_username}" if e.counterparty_username else "someone"
+    other = display_name(e.counterparty_username, e.counterparty_first_name)
     return f"💸 {when} · {actor} → {other}: {_money(e.amount_cents, e.currency)}"
 
 

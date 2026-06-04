@@ -5,6 +5,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.formatting import display_name
 from countbeans.services.group_info import get_group_info
 from countbeans.services.uow import UnitOfWork
 
@@ -63,8 +64,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     lines.append(f"Members ({info.known_count}):")
     if claimed:
         for m in claimed:
-            handle = f"@{m.username}" if m.username else m.first_name or str(m.user_id)
-            lines.append(f"  {handle}")
+            lines.append(f"  {display_name(m.username, m.first_name)}")
     else:
         lines.append("  (none yet)")
 

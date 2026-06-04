@@ -96,7 +96,9 @@ class StatementEntry(BaseModel):
     currency: str
     description: str | None            # expense only
     actor_username: str | None         # expense payer / settlement sender
+    actor_first_name: str | None = None        # display fallback when no @handle
     counterparty_username: str | None  # settlement recipient; None for expense
+    counterparty_first_name: str | None = None  # display fallback when no @handle
     participant_count: int | None      # expense only
     voided: bool                       # expense only; always False for settlements
 
