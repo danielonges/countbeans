@@ -7,6 +7,7 @@ from countbeans.bot.handlers import (
     addexpense,
     balance,
     currency,
+    event,
     group,
     join,
     settleup,
@@ -27,6 +28,7 @@ _COMMANDS = [
     BotCommand(command="simplify",   description="View or toggle debt simplification (admin)"),
     BotCommand(command="currency",   description="View or set the group's default currency (admin)"),
     BotCommand(command="statements", description="Your transactions ('all' for the whole group)"),
+    BotCommand(command="event",      description="Manage an event scope (new/pause/resume/close/add/remove)"),
     BotCommand(command="group",      description="Show group info and member list"),
 ]
 
@@ -52,6 +54,7 @@ async def run(token: str) -> None:
     dp.include_router(simplify.router)
     dp.include_router(currency.router)
     dp.include_router(statements.router)
+    dp.include_router(event.router)
     dp.include_router(group.router)
 
     bot = Bot(token=token)

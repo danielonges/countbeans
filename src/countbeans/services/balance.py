@@ -8,14 +8,20 @@ from countbeans.dto.domain import BalanceMap, GroupSummary, MemberBalance, Trans
 from .uow import UnitOfWork
 
 
-async def compute_balances(uow: UnitOfWork, group_id: uuid.UUID) -> BalanceMap:
-    return await uow.balances.compute_for_group(group_id)
+async def compute_balances(
+    uow: UnitOfWork, group_id: uuid.UUID, *, event_id: uuid.UUID | None = None
+) -> BalanceMap:
+    return await uow.balances.compute_for_group(group_id, event_id=event_id)
 
 
 async def get_group_summary(
-    uow: UnitOfWork, group_id: uuid.UUID, simplify_debts: bool
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    simplify_debts: bool,
+    *,
+    event_id: uuid.UUID | None = None,
 ) -> GroupSummary:
-    raw = await compute_balances(uow, group_id)
+    raw = await compute_balances(uow, group_id, event_id=event_id)
     user_ids = {key.user_id for key in raw}
     labels = await uow.balances.get_display_names(user_ids)
 

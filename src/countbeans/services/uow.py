@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .repositories import (
     BalanceRepository,
+    EventRepository,
     ExpenseRepository,
     GroupMemberRepository,
     GroupRepository,
@@ -28,6 +29,7 @@ class UnitOfWork:
         self.users = UserRepository(session)
         self.groups = GroupRepository(session)
         self.group_members = GroupMemberRepository(session)
+        self.events = EventRepository(session)
 
     async def __aenter__(self) -> "UnitOfWork":
         self._session = self._session_factory()

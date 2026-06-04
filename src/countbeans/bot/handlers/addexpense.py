@@ -70,6 +70,11 @@ async def cmd_addexpense(
         group_name=getattr(message.chat, "title", None),
     )
 
+    # Active-event mode: when the group has an active event, auto-tag this expense
+    # to it and split the event roster (not the whole group) — CLAUDE.md "Events".
+    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    event_id = active.id if active else None
+
     # The amount token may carry a currency marker ($50, €50, USD50); resolve it
     # against the group default. Mixed currencies are fine — balances derive
     # per-currency (see CLAUDE.md "Deriving balances").
@@ -86,7 +91,9 @@ async def cmd_addexpense(
     # the description is never mistaken for a participant.
     description, rest = extract_quoted_description(rest)
     mentions = _MENTION_RE.findall(rest)
-    participants = await resolve_participants(uow, group.id, payer.id, mentions)
+    participants = await resolve_participants(
+        uow, group.id, payer.id, mentions, event_id=event_id
+    )
 
     try:
         cmd = AddExpenseCommand(
@@ -96,6 +103,7 @@ async def cmd_addexpense(
             currency=currency,
             description=description,
             participants=[p.user_id for p in participants],
+            event_id=event_id,
             created_by=payer.id,
         )
     except Exception as exc:
@@ -111,10 +119,22 @@ async def cmd_addexpense(
         await message.reply(str(exc))
         return
 
+    # Every scoped reply echoes the scope so a "sticky" active event can't quietly
+    # mis-file an expense (CLAUDE.md "Events"). General tracking keeps its wording.
+    if active is not None:
+        head = (
+            f'✅ Added to "{active.name}": {description} — {_money(result.amount_cents, result.currency)}'
+            if description
+            else f'✅ Added to "{active.name}" — {_money(result.amount_cents, result.currency)}'
+        )
+    else:
+        head = (
+            f"Added expense: {description} — {_money(result.amount_cents, result.currency)}"
+            if description
+            else f"Added expense — {_money(result.amount_cents, result.currency)}"
+        )
     lines = [
-        f"Added expense: {description} — {_money(result.amount_cents, result.currency)}"
-        if description
-        else f"Added expense — {_money(result.amount_cents, result.currency)}",
+        head,
         f"Paid by: {display_name(payer.username, payer.first_name)}",
         f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
         "Shares:",
@@ -122,9 +142,10 @@ async def cmd_addexpense(
     for p in participants:
         lines.append(f"  {display_name(p.username, p.first_name)}: {_money(result.shares.get(p.user_id, 0), result.currency)}")
 
-    # When splitting the whole group, warn if the bot can't see everyone — it
-    # can only split among members who've interacted (CLAUDE.md "Onboarding").
-    if not mentions or all(h.lower() == "all" for h in mentions):
+    # When splitting the whole group, warn if the bot can't see everyone — it can
+    # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside
+    # an event, @all means the roster (an intentional subset), so this gate is skipped.
+    if active is None and (not mentions or all(h.lower() == "all" for h in mentions)):
         try:
             actual = await bot.get_chat_member_count(message.chat.id) - 1  # minus the bot
             if len(participants) < actual:

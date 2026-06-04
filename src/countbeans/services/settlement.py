@@ -22,11 +22,13 @@ async def owed_by_currency(
     to_id: uuid.UUID,
     *,
     simplify_debts: bool,
+    event_id: uuid.UUID | None = None,
 ) -> dict[str, int]:
-    """Per-currency amounts ``from_id`` is suggested to pay ``to_id``. Drives the
-    amount-less /settleup auto-fill and its multi-currency hint. An empty dict
-    means the current suggested settlement routes no payment between this pair."""
-    balances = await uow.balances.compute_for_group(group_id)
+    """Per-currency amounts ``from_id`` is suggested to pay ``to_id`` within the
+    given scope. Drives the amount-less /settleup auto-fill and its multi-currency
+    hint. An empty dict means the current suggested settlement routes no payment
+    between this pair."""
+    balances = await uow.balances.compute_for_group(group_id, event_id=event_id)
     return suggested_owed_by_currency(balances, from_id, to_id, simplify_debts=simplify_debts)
 
 
@@ -41,7 +43,7 @@ async def settle_up(
     # "Debt simplification"; see services.balance.suggested_owed). This single
     # check subsumes the old payer-negative / recipient-positive sign checks:
     # both cases yield owed == 0.
-    balances = await uow.balances.compute_for_group(cmd.group_id)
+    balances = await uow.balances.compute_for_group(cmd.group_id, event_id=cmd.event_id)
     owed = suggested_owed(
         balances, cmd.from_user_id, cmd.to_user_id, cmd.currency, simplify_debts=simplify_debts
     )
@@ -60,6 +62,7 @@ async def settle_up(
     settlement = Settlement(
         id=settlement_id,
         group_id=cmd.group_id,
+        event_id=cmd.event_id,
         from_user_id=cmd.from_user_id,
         to_user_id=cmd.to_user_id,
         amount_cents=cmd.amount_cents,
@@ -70,23 +73,28 @@ async def settle_up(
 
 
 async def settle_all(
-    uow: UnitOfWork, group_id: uuid.UUID, *, simplify_debts: bool
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    *,
+    simplify_debts: bool,
+    event_id: uuid.UUID | None = None,
 ) -> list[SettlementCreatedResult]:
-    """Record a settlement for every outstanding suggested transfer, zeroing the
-    whole group at once ("clear the board"). Honors the simplify toggle, so it
+    """Record a settlement for every outstanding suggested transfer in the scope,
+    zeroing it at once ("clear the board"). Honors the simplify toggle, so it
     records exactly the transfers /balance all would show. One transaction;
-    returns the recorded settlements (empty when the group is already settled).
+    returns the recorded settlements (empty when the scope is already settled).
 
     Each transfer becomes a real, ordinary settlement event — like any other
     /settleup — so the ledger stays a faithful audit trail (no special
     "everyone settled" marker). Admin-gating lives in the bot layer.
     """
-    balances = await uow.balances.compute_for_group(group_id)
+    balances = await uow.balances.compute_for_group(group_id, event_id=event_id)
     results: list[SettlementCreatedResult] = []
     for transfer in suggested_transfers(balances, simplify_debts=simplify_debts):
         settlement = Settlement(
             id=uuid_utils.uuid7(),
             group_id=group_id,
+            event_id=event_id,
             from_user_id=transfer.from_user_id,
             to_user_id=transfer.to_user_id,
             amount_cents=transfer.amount_cents,

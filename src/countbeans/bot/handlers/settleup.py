@@ -72,9 +72,17 @@ async def cmd_settleup(
         group_name=getattr(message.chat, "title", None),
     )
 
-    # @all — settle the whole group at once. Admin-only and amount-less.
+    # Active-event mode: settle within the active event's scope (writes are
+    # strictly active-scoped — /event pause to settle a general debt). CLAUDE.md.
+    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    event_id = active.id if active else None
+    scope_note = f' in "{active.name}"' if active else ""
+
+    # @all — settle the whole scope at once. Admin-only and amount-less.
     if target_username.lower() == "all":
-        await _settle_whole_group(message, bot, uow, group.id, group.simplify_debts)
+        await _settle_whole_group(
+            message, bot, uow, group.id, group.simplify_debts, event_id, scope_note
+        )
         return
 
     # A normal mention must resolve to someone already known — never create a
@@ -99,7 +107,12 @@ async def cmd_settleup(
         # Auto-fill: settle the full suggested you→them transfer in the default
         # currency. owed_by_currency reflects the same set /balance all shows.
         owed = await owed_by_currency(
-            uow, group.id, from_user.id, to_user.id, simplify_debts=group.simplify_debts
+            uow,
+            group.id,
+            from_user.id,
+            to_user.id,
+            simplify_debts=group.simplify_debts,
+            event_id=event_id,
         )
         if currency not in owed:
             others = [c for c in owed if c != currency]
@@ -126,6 +139,7 @@ async def cmd_settleup(
             to_user_id=to_user.id,
             amount_cents=amount_cents,
             currency=currency,
+            event_id=event_id,
             created_by=from_user.id,
         )
     except Exception as exc:
@@ -144,7 +158,7 @@ async def cmd_settleup(
 
     auto_note = " (full amount owed)" if amount_str is None else ""
     await message.reply(
-        f"Settled up: {display_name(from_user.username, from_user.first_name)} paid "
+        f"Settled up{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
         f"{_money(result.amount_cents, result.currency)}{auto_note}"
     )
@@ -159,21 +173,28 @@ async def cmd_settleup(
 
 
 async def _settle_whole_group(
-    message: Message, bot: Bot, uow: UnitOfWork, group_id: uuid.UUID, simplify_debts: bool
+    message: Message,
+    bot: Bot,
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    simplify_debts: bool,
+    event_id: uuid.UUID | None,
+    scope_note: str,
 ) -> None:
-    """/settleup @all — record every suggested transfer to zero the group.
+    """/settleup @all — record every suggested transfer to zero the scope.
 
     Admin-gated (the bot checks getChatMember, like /simplify): it rewrites
     everyone's standing, so it isn't a single member's call. Amount-less by
-    definition — it settles whatever is outstanding."""
+    definition — it settles whatever is outstanding. When an event is active it
+    zeroes that event's scope, not the general ledger."""
     assert message.from_user is not None
     if not await is_admin(bot, message.chat.id, message.from_user.id):
         await message.reply("Only group admins can settle up the whole group (/settleup @all).")
         return
 
-    results = await settle_all(uow, group_id, simplify_debts=simplify_debts)
+    results = await settle_all(uow, group_id, simplify_debts=simplify_debts, event_id=event_id)
     if not results:
-        await message.reply("Everyone's already settled up — nothing to record.")
+        await message.reply(f"Everyone's already settled up{scope_note} — nothing to record.")
         return
 
     ids = {r.from_user_id for r in results} | {r.to_user_id for r in results}
@@ -183,7 +204,7 @@ async def _settle_whole_group(
         username, first_name = names.get(uid, (None, None))
         return display_name(username, first_name)
 
-    lines = [f"✅ Settled up the whole group — {len(results)} transfer(s) recorded:"]
+    lines = [f"✅ Settled up the whole group{scope_note} — {len(results)} transfer(s) recorded:"]
     for r in results:
         lines.append(f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {_money(r.amount_cents, r.currency)}")
     await message.reply("\n".join(lines))

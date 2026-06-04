@@ -50,6 +50,7 @@ def dispatcher() -> Dispatcher:
         addexpense,
         balance,
         currency,
+        event,
         group,
         join,
         settleup,
@@ -67,5 +68,6 @@ def dispatcher() -> Dispatcher:
         simplify.router,
         currency.router,
         statements.router,
+        event.router,
         group.router,
     )

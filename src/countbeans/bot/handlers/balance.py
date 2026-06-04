@@ -45,17 +45,23 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     parts = text.split()
     show_all = len(parts) > 1 and parts[1].lower() == "all"
 
-    summary = await get_group_summary(uow, group.id, group.simplify_debts)
+    # /balance defaults to the active event's scope (general when none is active).
+    # Named cross-scope reads (/balance general, /balance "<event>") are deferred.
+    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    scope_in = f' in "{active.name}"' if active else ""
+    summary = await get_group_summary(
+        uow, group.id, group.simplify_debts, event_id=active.id if active else None
+    )
     display_by_id: dict[uuid.UUID, str] = {
         b.user_id: display_name(b.username, b.first_name) for b in summary.balances
     }
 
     if show_all:
         if not summary.balances:
-            await message.reply("No outstanding balances in this group.")
+            await message.reply(f"No outstanding balances{scope_in}.")
             return
 
-        lines = ["Group balances:"]
+        lines = [f'Balances for "{active.name}":' if active else "Group balances:"]
         for b in sorted(summary.balances, key=lambda x: -x.balance_cents):
             lines.append(f"  {display_by_id[b.user_id]}: {_fmt(b.balance_cents, b.currency)}")
 
@@ -76,10 +82,10 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     # toggle, so it agrees with /balance all and /settleup).
     my_balances = [b for b in summary.balances if b.user_id == caller.id]
     if not my_balances:
-        await message.reply("You have no outstanding balances in this group.")
+        await message.reply(f"You have no outstanding balances{scope_in}.")
         return
 
-    lines = ["Your balance:"]
+    lines = [f'Your balance in "{active.name}":' if active else "Your balance:"]
     for b in my_balances:
         direction = "you're owed" if b.balance_cents > 0 else "you owe"
         lines.append(f"  {_fmt(b.balance_cents, b.currency)} ({direction})")

@@ -41,3 +41,16 @@ class ExpenseCreatedResult(BaseModel):
     description: str | None
     shares: dict[uuid.UUID, int]
     event_id: uuid.UUID | None
+
+
+class EventCreatedResult(BaseModel):
+    """Confirmation returned after opening an event — what the bot needs to echo
+    the new scope. `currency` is the resolved per-event currency (None = inherits
+    the group default)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_id: uuid.UUID
+    group_id: uuid.UUID
+    name: str
+    currency: str | None

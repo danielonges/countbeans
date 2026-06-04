@@ -10,9 +10,18 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.db.models import (
+    Event,
+    EventMember,
+    Expense,
+    ExpenseShare,
+    Group,
+    GroupMember,
+    Settlement,
+    User,
+)
 from countbeans.dto.domain import ActivitySummary, BalanceKey, BalanceMap, MemberInfo
-from countbeans.dto.results import SettlementCreatedResult
+from countbeans.dto.results import EventCreatedResult, SettlementCreatedResult
 
 
 @dataclass(slots=True)
@@ -54,7 +63,7 @@ class SettlementRepository:
             to_user_id=row.to_user_id,
             amount_cents=row.amount_cents,
             currency=row.currency,
-            event_id=None,
+            event_id=row.event_id,
         )
 
 
@@ -90,14 +99,31 @@ class BalanceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def compute_for_group(self, group_id: uuid.UUID) -> BalanceMap:
-        """Return {BalanceKey(user_id, currency): net_cents}. Zero balances are omitted."""
+    async def compute_for_group(
+        self, group_id: uuid.UUID, *, event_id: uuid.UUID | None = None
+    ) -> BalanceMap:
+        """Return {BalanceKey(user_id, currency): net_cents} for one scope. Zero
+        balances are omitted.
+
+        The scope is the **general** ledger (``event_id IS NULL``) when ``event_id``
+        is None, else exactly that event's rows. Scopes are isolated — the general
+        balance excludes event-tagged rows and each event derives independently, so
+        the sum-to-zero invariant holds per ``(scope, currency)`` (CLAUDE.md
+        "Events")."""
+        exp_scope = (
+            Expense.event_id == event_id if event_id is not None
+            else Expense.event_id.is_(None)
+        )
+        set_scope = (
+            Settlement.event_id == event_id if event_id is not None
+            else Settlement.event_id.is_(None)
+        )
         result: BalanceMap = defaultdict(int)
 
         # 1. Payer sums — money fronted
         rows = await self._session.execute(
             select(Expense.payer_id, Expense.currency, func.sum(Expense.amount_cents))
-            .where(Expense.group_id == group_id, Expense.voided_at.is_(None))
+            .where(Expense.group_id == group_id, Expense.voided_at.is_(None), exp_scope)
             .group_by(Expense.payer_id, Expense.currency)
         )
         for payer_id, currency, total in rows:
@@ -107,7 +133,7 @@ class BalanceRepository:
         rows = await self._session.execute(
             select(ExpenseShare.user_id, Expense.currency, func.sum(ExpenseShare.share_cents))
             .join(Expense, Expense.id == ExpenseShare.expense_id)
-            .where(Expense.group_id == group_id, Expense.voided_at.is_(None))
+            .where(Expense.group_id == group_id, Expense.voided_at.is_(None), exp_scope)
             .group_by(ExpenseShare.user_id, Expense.currency)
         )
         for user_id, currency, total in rows:
@@ -116,7 +142,7 @@ class BalanceRepository:
         # 3. Settlements sent — debtor reduces their balance
         rows = await self._session.execute(
             select(Settlement.from_user_id, Settlement.currency, func.sum(Settlement.amount_cents))
-            .where(Settlement.group_id == group_id)
+            .where(Settlement.group_id == group_id, set_scope)
             .group_by(Settlement.from_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
@@ -125,7 +151,7 @@ class BalanceRepository:
         # 4. Settlements received — creditor balance is reduced
         rows = await self._session.execute(
             select(Settlement.to_user_id, Settlement.currency, func.sum(Settlement.amount_cents))
-            .where(Settlement.group_id == group_id)
+            .where(Settlement.group_id == group_id, set_scope)
             .group_by(Settlement.to_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
@@ -365,6 +391,17 @@ class GroupRepository:
             .values(default_currency=default_currency)
         )
 
+    async def set_active_event(
+        self, group_id: uuid.UUID, event_id: uuid.UUID | None
+    ) -> None:
+        """Point the active-event pointer at an open event (resume / new) or NULL
+        (pause / close). Durable, shared group state — not aiogram FSM."""
+        await self._session.execute(
+            update(Group)
+            .where(Group.id == group_id)
+            .values(active_event_id=event_id)
+        )
+
 
 class GroupMemberRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -403,3 +440,91 @@ class GroupMemberRepository:
             await self._session.flush()
             return True
         return False
+
+
+class EventRepository:
+    """Event scopes and their rosters. The one-open-per-group invariant is held by
+    the partial unique index `uq_events_one_open_per_group`; the service checks
+    `get_open` first to surface a friendly error rather than the raw violation."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, event: Event) -> None:
+        self._session.add(event)
+        await self._session.flush()
+
+    async def get(self, event_id: uuid.UUID) -> Event | None:
+        result = await self._session.execute(select(Event).where(Event.id == event_id))
+        return result.scalar_one_or_none()
+
+    async def get_open(self, group_id: uuid.UUID) -> Event | None:
+        """The group's single OPEN event, if any (at most one — see the index)."""
+        result = await self._session.execute(
+            select(Event).where(Event.group_id == group_id, Event.status == "open")
+        )
+        return result.scalar_one_or_none()
+
+    async def set_status(
+        self, event_id: uuid.UUID, status: str, closed_at: datetime | None
+    ) -> None:
+        await self._session.execute(
+            update(Event)
+            .where(Event.id == event_id)
+            .values(status=status, closed_at=closed_at)
+        )
+
+    async def ensure_member(self, event_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Add a roster row if absent. Returns True when newly added."""
+        result = await self._session.execute(
+            select(EventMember).where(
+                EventMember.event_id == event_id, EventMember.user_id == user_id
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            self._session.add(EventMember(event_id=event_id, user_id=user_id))
+            await self._session.flush()
+            return True
+        return False
+
+    async def remove_member(self, event_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Drop a roster row. Returns True when one was removed, False if absent."""
+        member = (
+            await self._session.execute(
+                select(EventMember).where(
+                    EventMember.event_id == event_id, EventMember.user_id == user_id
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            return False
+        await self._session.delete(member)
+        await self._session.flush()
+        return True
+
+    async def list_members(self, event_id: uuid.UUID) -> list[MemberInfo]:
+        """The event's roster with user info (placeholders flagged), like
+        GroupMemberRepository.list_members but over event_members."""
+        rows = await self._session.execute(
+            select(User)
+            .join(EventMember, EventMember.user_id == User.id)
+            .where(EventMember.event_id == event_id)
+            .order_by(User.username)
+        )
+        return [
+            MemberInfo(
+                user_id=u.id,
+                username=u.username,
+                first_name=u.first_name,
+                is_pending=u.telegram_user_id is None,
+            )
+            for u in rows.scalars()
+        ]
+
+    def _to_result(self, event: Event) -> EventCreatedResult:
+        return EventCreatedResult(
+            event_id=event.id,
+            group_id=event.group_id,
+            name=event.name,
+            currency=event.default_currency,
+        )

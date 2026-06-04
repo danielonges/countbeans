@@ -24,6 +24,8 @@ async def resolve_participants(
     group_id: uuid.UUID,
     payer_id: uuid.UUID,
     mentions: list[str],
+    *,
+    event_id: uuid.UUID | None = None,
 ) -> list[MemberInfo]:
     """Resolve who an expense is split among, from the raw @handles parsed off
     the command.
@@ -34,14 +36,21 @@ async def resolve_participants(
       automatically — mention yourself to be included. Unknown handles become
       pending placeholders.
 
-    The payer is always ensured to be a group member first (so a "split
-    everyone" reflects them, and a payer who only ever pays still appears in the
-    roster). Returns one MemberInfo per participant, deduplicated, order
-    preserved.
+    When ``event_id`` is given the scope is the **event roster** (a deliberate
+    opt-in subset of the group): ``@all``/empty splits the roster — no group
+    coverage check, since the roster is intentional — and named mentions join the
+    roster implicitly (CLAUDE.md "Events"). The payer is always ensured onto the
+    group (and the event roster, when scoped) first, so a "split everyone"
+    reflects them and a payer who only ever pays still appears. Returns one
+    MemberInfo per participant, deduplicated, order preserved.
     """
     await uow.group_members.ensure_member(group_id, payer_id)
+    if event_id is not None:
+        await uow.events.ensure_member(event_id, payer_id)
 
     if _is_split_everyone(mentions):
+        if event_id is not None:
+            return await uow.events.list_members(event_id)
         return await uow.group_members.list_members(group_id)
 
     participants: list[MemberInfo] = []
@@ -51,6 +60,8 @@ async def resolve_participants(
             continue
         user = await uow.users.resolve_mention(handle)
         await uow.group_members.ensure_member(group_id, user.id)
+        if event_id is not None:
+            await uow.events.ensure_member(event_id, user.id)
         if user.id not in seen:
             participants.append(
                 MemberInfo(
@@ -121,6 +132,7 @@ async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreated
     expense = Expense(
         id=expense_id,
         group_id=cmd.group_id,
+        event_id=cmd.event_id,
         payer_id=cmd.payer_id,
         amount_cents=cmd.amount_cents,
         currency=cmd.currency,

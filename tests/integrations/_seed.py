@@ -5,12 +5,16 @@ test can set up "two members with a debt between them" before driving a command.
 Everything uses DEFAULT_CHAT_ID so the group a handler upserts is the same one
 seeded here.
 """
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Group, User
-from countbeans.dto.commands import AddExpenseCommand
+from countbeans.dto.commands import AddExpenseCommand, CreateEventCommand
+from countbeans.dto.results import EventCreatedResult
 from countbeans.services.add_expense import add_expense
+from countbeans.services.events import create_event
 from countbeans.services.repositories import (
     GroupMemberRepository,
     GroupRepository,
@@ -54,6 +58,23 @@ async def seed_member(
     return user
 
 
+async def seed_event(
+    session: AsyncSession,
+    group: Group,
+    *,
+    creator: User,
+    name: str = "Trip",
+) -> EventCreatedResult:
+    """Open an event via the real service (sets the active pointer, adds the
+    creator to the roster). Returns the EventCreatedResult (has .event_id)."""
+    result = await create_event(
+        HarnessUoW(session),
+        CreateEventCommand(group_id=group.id, name=name, created_by=creator.id),
+    )
+    await session.flush()
+    return result
+
+
 async def seed_expense(
     session: AsyncSession,
     group: Group,
@@ -63,8 +84,10 @@ async def seed_expense(
     amount_cents: int,
     currency: str = "SGD",
     description: str = "seed",
+    event_id: uuid.UUID | None = None,
 ) -> None:
-    """Record an even-split expense via the real service (so balances derive)."""
+    """Record an even-split expense via the real service (so balances derive). Pass
+    event_id to tag it to an event scope."""
     await add_expense(
         HarnessUoW(session),
         AddExpenseCommand(
@@ -74,6 +97,7 @@ async def seed_expense(
             currency=currency,
             description=description,
             participants=[p.id for p in participants],
+            event_id=event_id,
             created_by=payer.id,
         ),
     )

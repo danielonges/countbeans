@@ -87,3 +87,58 @@ class AddExpenseCommand(BaseModel):
         if not v:
             raise ValueError("participants must not be empty")
         return v
+
+
+class CreateEventCommand(BaseModel):
+    """Open a new event scope. `default_currency` is optional (NULL = inherit the
+    group default); the bot leaves it None today (per-event currency is deferred)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    group_id: uuid.UUID
+    name: str
+    default_currency: str | None = None
+    created_by: uuid.UUID
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("event name must not be blank")
+        return v
+
+    @field_validator("default_currency")
+    @classmethod
+    def currency_three_chars(cls, v: str | None) -> str | None:
+        if v is not None and len(v) != 3:
+            raise ValueError("currency must be exactly 3 characters (ISO 4217)")
+        return v
+
+
+class SetActiveEventCommand(BaseModel):
+    """Point a group's active-event pointer: an event id (resume) or None (pause).
+    Two commands → two transactions; see CLAUDE.md "Events"."""
+
+    model_config = ConfigDict(frozen=True)
+
+    group_id: uuid.UUID
+    event_id: uuid.UUID | None
+
+
+class SetEventStatusCommand(BaseModel):
+    """Transition an event's lifecycle status (close today; reopen wired later)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_id: uuid.UUID
+    status: Literal["open", "closed"]
+
+
+class EditEventRosterCommand(BaseModel):
+    """Add or remove a single user from an event's roster."""
+
+    model_config = ConfigDict(frozen=True)
+
+    event_id: uuid.UUID
+    user_id: uuid.UUID
+    action: Literal["add", "remove"]
