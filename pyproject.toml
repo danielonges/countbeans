@@ -33,7 +33,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
     "watchfiles>=1.2.0",
-    "pyright>=1.1.409",
+    "pyright==1.1.410",
     "pre-commit>=4.0.0",
 ]
 
