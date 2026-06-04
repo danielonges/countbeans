@@ -1,6 +1,63 @@
 """Shared parsing helpers for the bot's command handlers."""
 import re
 
+# Opening → closing quote characters accepted around a description. Covers the
+# straight ASCII quotes and the "smart"/curly quotes mobile keyboards substitute
+# automatically (the common reason a typed "…" fails to match) — plus backticks.
+# A description must be wrapped in a *matching pair*: a curly opener needs a curly
+# closer, etc. (see extract_quoted_description).
+_QUOTE_PAIRS = {
+    '"': '"',
+    "'": "'",
+    "“": "”",  # “ ”  curly double
+    "‘": "’",  # ‘ ’  curly single
+    "«": "»",  # « »  guillemets
+    "`": "`",
+}
+
+
+def extract_quoted_description(text: str) -> tuple[str | None, str]:
+    """Pull a quoted description out of ``text``, returning
+    ``(description, remaining_text)``.
+
+    * Accepts any **matching** quote pair from ``_QUOTE_PAIRS`` (so a curly
+      opener is only closed by its curly partner, never a straight quote).
+    * A backslash **escapes the next character**, so the closing quote can appear
+      inside the description (``"she said \\"hi\\""`` → ``she said "hi"``) and a
+      literal backslash is written ``\\\\``.
+    * Scans left to right for the first opener that has a valid matching close;
+      an unmatched opener (e.g. an apostrophe in ``it's``) is skipped, not
+      treated as the start of a quote, so a later real quote still wins.
+    * Returns ``(None, text)`` unchanged when there is no quoted run; an empty
+      quote (``""``) yields ``None`` too.
+
+    The matched run (quotes included) is removed from ``remaining_text`` so the
+    caller can then scan it for @mentions without seeing anything inside the
+    description.
+    """
+    n = len(text)
+    i = 0
+    while i < n:
+        opener = text[i]
+        closer = _QUOTE_PAIRS.get(opener)
+        if closer is not None:
+            chars: list[str] = []
+            j = i + 1
+            while j < n:
+                c = text[j]
+                if c == "\\" and j + 1 < n:
+                    chars.append(text[j + 1])  # escape: take the next char literally
+                    j += 2
+                    continue
+                if c == closer:
+                    description = "".join(chars) or None
+                    return description, text[:i] + text[j + 1 :]
+                chars.append(c)
+                j += 1
+            # Opener had no matching closer — not a quote; keep scanning past it.
+        i += 1
+    return None, text
+
 # Currency *symbols* that map to exactly one ISO-4217 code in this app's context.
 # Deliberately omits `$`, which is ambiguous across USD/SGD/AUD/CAD/HKD/…: rather
 # than guess (and risk silently mis-currencying a money ledger), `$` is resolved

@@ -496,7 +496,7 @@ At the service level the payer is just another participant *when included*: thei
 Parse first, then validate:
 
 1. **Amount** — positive, at most 2 decimal places, parsed to integer cents **from the string** (never via `float`). Reject `0`, negatives, and >2 dp. Currency is the group default.
-2. **Description** — a quoted `"…"` string, or the run of words between the amount and the first `@mention`. Use quotes if it contains `@`. May be empty.
+2. **Description** — a quoted string, or the run of words between the amount and the first `@mention`. Use quotes if it contains `@`. Any **matching quote pair** is accepted — straight `"…"`/`'…'`, the curly/smart quotes mobile keyboards auto-substitute (`“…”`, `‘…’`), guillemets, or backticks — and a **backslash escapes the next character**, so the closing quote can appear inside (`"she said \"hi\""`). A curly opener must be closed by its curly partner (no mixing). Parsed by `extract_quoted_description` in `bot/parsing.py`; an unmatched opener (e.g. an apostrophe in `it's`) is skipped, not treated as a quote. May be empty.
 3. **One mode per command, inferred from the suffixes:**
    - No suffix on any mention → **equal**.
    - All suffixes end in `%` → **percentage**; must sum to 100.

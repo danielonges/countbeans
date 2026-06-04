@@ -15,7 +15,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.formatting import display_name
-from countbeans.bot.parsing import parse_money
+from countbeans.bot.parsing import extract_quoted_description, parse_money
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.uow import UnitOfWork
@@ -77,13 +77,10 @@ async def cmd_addexpense(
 
     rest = " ".join(tokens[1:])
 
-    # Extract optional quoted description
-    description: str | None = None
-    quoted = re.search(r'"([^"]*)"', rest)
-    if quoted:
-        description = quoted.group(1) or None
-        rest = rest[: quoted.start()] + rest[quoted.end() :]
-
+    # Pull out an optional quoted description (any matching quote pair, escapes
+    # honored), then scan whatever's left for @mentions — so an @ or quote inside
+    # the description is never mistaken for a participant.
+    description, rest = extract_quoted_description(rest)
     mentions = _MENTION_RE.findall(rest)
     participants = await resolve_participants(uow, group.id, payer.id, mentions)
 
