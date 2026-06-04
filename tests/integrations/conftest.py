@@ -2,9 +2,12 @@ import os
 from collections.abc import AsyncGenerator
 
 import pytest
+from aiogram import Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from countbeans.db._base import Base
+
+from ._bot_harness import build_dispatcher
 
 # Async DSN for the test database, injected by the Compose `test` service
 # (points at the ephemeral `test-db`). When unset, integration tests skip — run
@@ -34,3 +37,35 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
         yield s
         await s.rollback()
     await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def dispatcher() -> Dispatcher:
+    """One Dispatcher with every handler router, built once per test session.
+
+    A router can attach to only one Dispatcher per process, so all handler tests
+    share this single instance (the per-test `uow` is passed in via `feed`).
+    """
+    from countbeans.bot.handlers import (
+        addexpense,
+        balance,
+        currency,
+        group,
+        join,
+        settleup,
+        simplify,
+        start,
+        statements,
+    )
+
+    return build_dispatcher(
+        start.router,
+        join.router,
+        settleup.router,
+        addexpense.router,
+        balance.router,
+        simplify.router,
+        currency.router,
+        statements.router,
+        group.router,
+    )

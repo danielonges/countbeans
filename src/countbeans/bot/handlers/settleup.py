@@ -19,12 +19,12 @@ import re
 import uuid
 
 from aiogram import Bot, Router
-from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.formatting import display_name
 from countbeans.bot.parsing import parse_amount_cents
+from countbeans.bot.permissions import is_admin
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
 from countbeans.services.uow import UnitOfWork
@@ -36,7 +36,6 @@ router = Router()
 # The command args (CommandObject strips "/settleup" and any "@botname"):
 #   @handle 12.50  |  @handle 12  |  @handle  (amount omitted → auto)  |  @all
 _ARGS_RE = re.compile(r"^@([\w.]+)(?:\s+(\d+(?:\.\d{1,2})?))?$")
-_ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
 
 
 def _money(cents: int, currency: str) -> str:
@@ -168,8 +167,7 @@ async def _settle_whole_group(
     everyone's standing, so it isn't a single member's call. Amount-less by
     definition — it settles whatever is outstanding."""
     assert message.from_user is not None
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in _ADMIN_STATUSES:
+    if not await is_admin(bot, message.chat.id, message.from_user.id):
         await message.reply("Only group admins can settle up the whole group (/settleup @all).")
         return
 

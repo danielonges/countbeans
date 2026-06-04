@@ -131,7 +131,7 @@ async def cmd_addexpense(
                 gap = actual - len(participants)
                 lines.append(
                     f"\n⚠️ Split among the {len(participants)} member(s) I know — "
-                    f"{gap} more haven't interacted yet. Ask them to /start to be included."
+                    f"{gap} more haven't interacted yet. Ask them to /join to be included."
                 )
         except Exception:
             logger.warning("could not fetch chat member count for %s", message.chat.id)

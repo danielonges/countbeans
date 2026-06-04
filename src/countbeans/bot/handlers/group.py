@@ -79,7 +79,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         lines.append(
             f"\n⚠️ {gap} member(s) in this chat haven't interacted with the bot yet "
             f"({info.known_count}/{info.actual_count} known). "
-            "Ask them to send /start."
+            "Ask them to send /join."
         )
 
     # Activity
