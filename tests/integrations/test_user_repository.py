@@ -121,6 +121,29 @@ async def test_resolve_mention_creates_placeholder_for_unknown_handle(session: A
     assert await _count_users(session) == 1
 
 
+async def test_find_by_mention_returns_none_for_unknown(session: AsyncSession) -> None:
+    """find_by_mention is lookup-only: an unknown handle yields None and creates
+    nothing (so /settleup never spawns a stray placeholder)."""
+    repo = UserRepository(session)
+    assert await repo.find_by_mention("ghost") is None
+    assert await _count_users(session) == 0
+
+
+async def test_find_by_mention_finds_existing_prefers_claimed(session: AsyncSession) -> None:
+    repo = UserRepository(session)
+    placeholder = await repo.resolve_mention("heidi")  # placeholder created
+    claimed = User(id=uuid_utils.uuid7(), telegram_user_id=700, username="heidi")
+    session.add(claimed)
+    await session.flush()
+
+    found = await repo.find_by_mention("heidi")
+    assert found is not None
+    assert found.id == claimed.id  # claimed wins over the placeholder
+    assert found.id != placeholder.id
+    # Lookup must not create anything: only the placeholder + claimed exist.
+    assert await _count_users(session) == 2
+
+
 async def test_resolve_mention_claimed_wins_over_placeholder(session: AsyncSession) -> None:
     """Rename/reuse edge: a claimed row and a placeholder share one handle. The
     claimed identity must win — order_by puts telegram_user_id IS NULL last."""

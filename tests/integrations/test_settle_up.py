@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.repositories import BalanceRepository, SettlementRepository
-from countbeans.services.settlement import owed_by_currency, settle_up
+from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
 
 
 class _SessionUoW:
@@ -267,3 +267,35 @@ async def test_settle_up_caps_at_suggested_not_net_debt(session: AsyncSession) -
     # Settling exactly what's owed to alice succeeds.
     result = await settle_up(uow, _cmd(group, caller, alice, amount_cents=3000), simplify_debts=True)  # type: ignore[arg-type]
     assert result.amount_cents == 3000
+
+
+async def test_settle_all_zeroes_the_group(session: AsyncSession) -> None:
+    """/settleup @all records every suggested transfer, driving all balances to
+    zero in one transaction."""
+    group, (caller, alice, carol) = await _seed(session, n_users=3)
+    await _expense_with_shares(session, group, alice, [(caller, 3000)])
+    await _expense_with_shares(session, group, carol, [(caller, 2000)])
+    uow = _SessionUoW(session)
+
+    results = await settle_all(uow, group.id, simplify_debts=True)  # type: ignore[arg-type]
+
+    # Two suggested transfers: caller→alice 3000, caller→carol 2000.
+    assert len(results) == 2
+    assert {(r.from_user_id, r.to_user_id, r.amount_cents) for r in results} == {
+        (caller.id, alice.id, 3000),
+        (caller.id, carol.id, 2000),
+    }
+
+    # Every balance is now zero — the group is fully settled.
+    remaining = await uow.balances.compute_for_group(group.id)  # type: ignore[arg-type]
+    assert remaining == {}
+
+
+async def test_settle_all_on_settled_group_records_nothing(session: AsyncSession) -> None:
+    group, _ = await _seed(session, n_users=2)  # no expenses → nothing outstanding
+    uow = _SessionUoW(session)
+
+    results = await settle_all(uow, group.id, simplify_debts=True)  # type: ignore[arg-type]
+    assert results == []
+    rows = (await session.execute(select(Settlement))).scalars().all()
+    assert rows == []

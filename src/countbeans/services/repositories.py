@@ -296,22 +296,28 @@ class UserRepository:
         await self._session.flush()
         return user
 
-    async def resolve_mention(self, username: str) -> User:
-        """Resolve an @mention to a user row. Prefer someone we've already seen
-        (claimed: telegram_user_id IS NOT NULL) over a pending placeholder, and
-        create a new placeholder only when the handle is entirely unknown.
+    async def find_by_mention(self, username: str) -> User | None:
+        """Look up an existing user by @handle without creating anything. Prefers
+        a claimed row (telegram_user_id IS NOT NULL) over a pending placeholder.
 
         Matching is by username — a best-effort display-alias hint, never
         identity (CLAUDE.md) — which is why a claimed row wins when a
         rename/reuse has left both a claimed user and a placeholder under one
-        handle.
+        handle. Use this where a mention must resolve to *someone already known*
+        (e.g. /settleup), so a typo'd handle never spawns a stray placeholder.
         """
         result = await self._session.execute(
             select(User)
             .where(User.username == username)
             .order_by(User.telegram_user_id.is_(None))  # claimed (False) sorts first
         )
-        existing = result.scalars().first()
+        return result.scalars().first()
+
+    async def resolve_mention(self, username: str) -> User:
+        """Resolve an @mention to a user row, creating a pending placeholder when
+        the handle is entirely unknown (the right behavior for /addexpense, where
+        naming a not-yet-seen person should track them)."""
+        existing = await self.find_by_mention(username)
         if existing is not None:
             return existing
         user = User(id=uuid_utils.uuid7(), username=username)

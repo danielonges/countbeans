@@ -7,7 +7,7 @@ from countbeans.db.models import Settlement
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
 
-from .balance import suggested_owed, suggested_owed_by_currency
+from .balance import suggested_owed, suggested_owed_by_currency, suggested_transfers
 from .uow import UnitOfWork
 
 
@@ -67,3 +67,31 @@ async def settle_up(
     )
     await uow.settlements.add(settlement)
     return uow.settlements._to_dto(settlement)
+
+
+async def settle_all(
+    uow: UnitOfWork, group_id: uuid.UUID, *, simplify_debts: bool
+) -> list[SettlementCreatedResult]:
+    """Record a settlement for every outstanding suggested transfer, zeroing the
+    whole group at once ("clear the board"). Honors the simplify toggle, so it
+    records exactly the transfers /balance all would show. One transaction;
+    returns the recorded settlements (empty when the group is already settled).
+
+    Each transfer becomes a real, ordinary settlement event — like any other
+    /settleup — so the ledger stays a faithful audit trail (no special
+    "everyone settled" marker). Admin-gating lives in the bot layer.
+    """
+    balances = await uow.balances.compute_for_group(group_id)
+    results: list[SettlementCreatedResult] = []
+    for transfer in suggested_transfers(balances, simplify_debts=simplify_debts):
+        settlement = Settlement(
+            id=uuid_utils.uuid7(),
+            group_id=group_id,
+            from_user_id=transfer.from_user_id,
+            to_user_id=transfer.to_user_id,
+            amount_cents=transfer.amount_cents,
+            currency=transfer.currency,
+        )
+        await uow.settlements.add(settlement)
+        results.append(uow.settlements._to_dto(settlement))
+    return results
