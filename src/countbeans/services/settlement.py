@@ -1,31 +1,59 @@
 """settle_up service function — records a settlement payment in the ledger."""
+import uuid
+
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
 
 from countbeans.db.models import Settlement
 from countbeans.dto.commands import SettleUpCommand
-from countbeans.dto.domain import BalanceKey
 from countbeans.dto.results import SettlementCreatedResult
 
+from .balance import suggested_owed, suggested_owed_by_currency
 from .uow import UnitOfWork
 
 
-async def settle_up(uow: UnitOfWork, cmd: SettleUpCommand) -> SettlementCreatedResult:
+def _fmt(cents: int, currency: str) -> str:
+    return f"{currency} {cents // 100}.{cents % 100:02d}"
+
+
+async def owed_by_currency(
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    from_id: uuid.UUID,
+    to_id: uuid.UUID,
+    *,
+    simplify_debts: bool,
+) -> dict[str, int]:
+    """Per-currency amounts ``from_id`` is suggested to pay ``to_id``. Drives the
+    amount-less /settleup auto-fill and its multi-currency hint. An empty dict
+    means the current suggested settlement routes no payment between this pair."""
+    balances = await uow.balances.compute_for_group(group_id)
+    return suggested_owed_by_currency(balances, from_id, to_id, simplify_debts=simplify_debts)
+
+
+async def settle_up(
+    uow: UnitOfWork, cmd: SettleUpCommand, *, simplify_debts: bool
+) -> SettlementCreatedResult:
     if cmd.from_user_id == cmd.to_user_id:
         raise ValueError("from_user_id and to_user_id must be different users")
 
+    # A settlement is only valid *along a suggested transfer*, and never for more
+    # than that transfer's amount — so balances can never flip (CLAUDE.md
+    # "Debt simplification"; see services.balance.suggested_owed). This single
+    # check subsumes the old payer-negative / recipient-positive sign checks:
+    # both cases yield owed == 0.
     balances = await uow.balances.compute_for_group(cmd.group_id)
-    payer_balance = balances.get(BalanceKey(cmd.from_user_id, cmd.currency), 0)
-    recipient_balance = balances.get(BalanceKey(cmd.to_user_id, cmd.currency), 0)
-
-    if payer_balance >= 0:
+    owed = suggested_owed(
+        balances, cmd.from_user_id, cmd.to_user_id, cmd.currency, simplify_debts=simplify_debts
+    )
+    if owed <= 0:
         raise ValueError(
-            f"You don't owe anyone in {cmd.currency} — your balance is already "
-            f"{'zero' if payer_balance == 0 else 'positive'}."
+            f"The suggested settlement doesn't have you paying that person in "
+            f"{cmd.currency}. Run /balance all to see who to pay."
         )
-    if recipient_balance <= 0:
+    if cmd.amount_cents > owed:
         raise ValueError(
-            f"That person is not owed any {cmd.currency} — settling with them "
-            "would not reduce a real debt."
+            f"You only owe {_fmt(owed, cmd.currency)} there — settle that or "
+            "less, or omit the amount to settle in full."
         )
 
     settlement_id = uuid_utils.uuid7()

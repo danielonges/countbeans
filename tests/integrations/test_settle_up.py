@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.repositories import BalanceRepository, SettlementRepository
-from countbeans.services.settlement import settle_up
+from countbeans.services.settlement import owed_by_currency, settle_up
 
 
 class _SessionUoW:
@@ -116,7 +116,7 @@ async def test_settle_up_records_settlement(session: AsyncSession) -> None:
     await _add_expense(session, group, payee, [payer, payee], amount_cents=2000)
     uow = _SessionUoW(session)
 
-    result = await settle_up(uow, _cmd(group, payer, payee))  # type: ignore[arg-type]
+    result = await settle_up(uow, _cmd(group, payer, payee), simplify_debts=True)  # type: ignore[arg-type]
 
     stmt = select(Settlement).where(Settlement.id == result.settlement_id)
     db_row = (await session.execute(stmt)).scalar_one_or_none()
@@ -133,7 +133,7 @@ async def test_settle_up_returns_correct_result(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
     cmd = _cmd(group, payer, payee, amount_cents=2500, currency="SGD")
 
-    result = await settle_up(uow, cmd)  # type: ignore[arg-type]
+    result = await settle_up(uow, cmd, simplify_debts=True)  # type: ignore[arg-type]
 
     assert result.from_user_id == payer.id
     assert result.to_user_id == payee.id
@@ -162,9 +162,10 @@ async def test_multiple_settlements_independent(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
 
     # bob pays alice partially
-    r1 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=1000))  # type: ignore[arg-type]
-    # bob still owes alice 500 more (share was 1500, paid 1000)
-    r2 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=500))  # type: ignore[arg-type]
+    r1 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=1000), simplify_debts=True)  # type: ignore[arg-type]
+    # bob still owes alice 500 more (share was 1500, paid 1000) — the cap
+    # re-derives from the post-r1 balances, so this second payment is allowed.
+    r2 = await settle_up(uow, _cmd(group, bob, alice, amount_cents=500), simplify_debts=True)  # type: ignore[arg-type]
 
     assert r1.settlement_id != r2.settlement_id
 
@@ -182,24 +183,87 @@ async def test_multiple_settlements_independent(session: AsyncSession) -> None:
 
 
 async def test_settle_up_payer_has_no_debt_rejected(session: AsyncSession) -> None:
-    """Settling with someone when you don't owe anyone must be rejected."""
+    """A creditor (owes nothing) has no suggested outgoing payment, so settling
+    is rejected."""
     group, (alice, bob) = await _seed(session)
     # alice paid — alice has positive balance, bob is the debtor
     await _add_expense(session, group, alice, [alice, bob], amount_cents=2000)
     uow = _SessionUoW(session)
 
     # alice tries to pay bob even though alice is owed money
-    with pytest.raises(ValueError, match="don't owe anyone"):
-        await settle_up(uow, _cmd(group, alice, bob))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="doesn't have you paying"):
+        await settle_up(uow, _cmd(group, alice, bob), simplify_debts=True)  # type: ignore[arg-type]
 
 
 async def test_settle_up_recipient_not_owed_rejected(session: AsyncSession) -> None:
-    """Settling with someone who isn't owed any money must be rejected."""
+    """Paying someone the suggested settlement never routes a payment to (here a
+    zero-balance member) is rejected."""
     group, (alice, bob, charlie) = await _seed(session, n_users=3)
     # alice paid for alice + bob; charlie has no expenses
     await _add_expense(session, group, alice, [alice, bob], amount_cents=2000)
     uow = _SessionUoW(session)
 
     # bob owes alice, but tries to pay charlie (who is owed nothing)
-    with pytest.raises(ValueError, match="not owed any"):
-        await settle_up(uow, _cmd(group, bob, charlie))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="doesn't have you paying"):
+        await settle_up(uow, _cmd(group, bob, charlie), simplify_debts=True)  # type: ignore[arg-type]
+
+
+async def test_settle_up_overpayment_rejected(session: AsyncSession) -> None:
+    """An explicit amount exceeding the suggested transfer is rejected, so a
+    balance can never be flipped by overpaying."""
+    group, (payer, payee) = await _seed(session)
+    # payee paid 2000 split evenly → payer owes exactly 1000.
+    await _add_expense(session, group, payee, [payer, payee], amount_cents=2000)
+    uow = _SessionUoW(session)
+
+    with pytest.raises(ValueError, match="only owe"):
+        await settle_up(uow, _cmd(group, payer, payee, amount_cents=1500), simplify_debts=True)  # type: ignore[arg-type]
+
+    # No settlement row was written.
+    rows = (await session.execute(select(Settlement))).scalars().all()
+    assert rows == []
+
+
+async def _expense_with_shares(
+    session: AsyncSession, group: Group, payer: User, shares: list[tuple[User, int]]
+) -> Expense:
+    """Seed an expense with explicit per-user shares (payer may be excluded)."""
+    expense = Expense(
+        id=uuid_utils.uuid7(),
+        group_id=group.id,
+        payer_id=payer.id,
+        amount_cents=sum(c for _, c in shares),
+        currency="SGD",
+        description="test expense",
+        created_by=payer.id,
+    )
+    session.add(expense)
+    await session.flush()
+    session.add_all(
+        [ExpenseShare(expense_id=expense.id, user_id=u.id, share_cents=c) for u, c in shares]
+    )
+    await session.flush()
+    return expense
+
+
+async def test_settle_up_caps_at_suggested_not_net_debt(session: AsyncSession) -> None:
+    """The motivating regression: when a caller's net debt is spread across
+    several creditors, /settleup @alice is capped at what's suggested to *Alice*,
+    not the caller's whole net debt."""
+    group, (caller, alice, carol) = await _seed(session, n_users=3)
+    # caller owes alice 3000 and carol 2000 → net debt 5000, but only 3000 to alice.
+    await _expense_with_shares(session, group, alice, [(caller, 3000)])
+    await _expense_with_shares(session, group, carol, [(caller, 2000)])
+    uow = _SessionUoW(session)
+
+    # Auto-fill resolves to the alice-specific 3000, not the 5000 net debt.
+    owed = await owed_by_currency(uow, group.id, caller.id, alice.id, simplify_debts=True)  # type: ignore[arg-type]
+    assert owed == {"SGD": 3000}
+
+    # Trying to dump the whole 5000 net debt on alice is rejected.
+    with pytest.raises(ValueError, match="only owe"):
+        await settle_up(uow, _cmd(group, caller, alice, amount_cents=5000), simplify_debts=True)  # type: ignore[arg-type]
+
+    # Settling exactly what's owed to alice succeeds.
+    result = await settle_up(uow, _cmd(group, caller, alice, amount_cents=3000), simplify_debts=True)  # type: ignore[arg-type]
+    assert result.amount_cents == 3000

@@ -2,10 +2,12 @@
 
 Parses: /settleup @username [amount]
 
-Omitting the amount auto-fills the full outstanding debt to @username in
-the group's default currency. If the caller owes @username in multiple
-currencies the group default is picked; if they owe nothing in the default
-currency they are told to specify an amount explicitly.
+"What you owe a person" is the amount of the suggested ``you -> them`` transfer
+that ``/balance all`` shows (honoring the group's simplify toggle). Omitting the
+amount auto-fills that suggested amount in the group's default currency; an
+explicit amount may not exceed it (settlements only ever happen along a
+suggested transfer, so balances can never flip). The cap and the
+no-suggested-payment cases are enforced in the settle_up service.
 """
 import logging
 import re
@@ -16,8 +18,7 @@ from aiogram.types import Message
 
 from countbeans.bot.parsing import parse_amount_cents
 from countbeans.dto.commands import SettleUpCommand
-from countbeans.dto.domain import BalanceKey
-from countbeans.services.settlement import settle_up
+from countbeans.services.settlement import owed_by_currency, settle_up
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -58,46 +59,37 @@ async def cmd_settleup(message: Message, command: CommandObject, uow: UnitOfWork
         group_name=getattr(message.chat, "title", None),
     )
 
+    currency = group.default_currency
+
     if amount_str is not None:
         try:
             amount_cents = parse_amount_cents(amount_str)
         except ValueError:
             await message.reply("Invalid amount. Please use a positive number, e.g. 25.50")
             return
-        currency = group.default_currency
     else:
-        # Auto-fill: derive what the caller owes this specific person.
-        # The balance formula gives net group positions, not pairwise debts, so we
-        # use the group default currency and check the caller's net balance — if
-        # negative, the full absolute value is the auto-amount. Multiple currencies
-        # are resolved by picking the group default; if that's zero, tell the user
-        # to specify an amount.
-        balances = await uow.balances.compute_for_group(group.id)
-        currency = group.default_currency
-        payer_balance = balances.get(BalanceKey(from_user.id, currency), 0)
-
-        # Check if the user owes in any other currencies too (for the hint).
-        owed_currencies = [
-            key.currency for key, cents in balances.items()
-            if key.user_id == from_user.id and cents < 0
-        ]
-
-        if payer_balance >= 0:
-            if owed_currencies:
-                # Owes in other currencies but not the default.
-                others = ", ".join(c for c in owed_currencies if c != currency)
+        # Auto-fill: settle the full suggested you→them transfer in the default
+        # currency. owed_by_currency reflects the same set /balance all shows.
+        owed = await owed_by_currency(
+            uow, group.id, from_user.id, to_user.id, simplify_debts=group.simplify_debts
+        )
+        if currency not in owed:
+            others = [c for c in owed if c != currency]
+            if others:
+                detail = ", ".join(
+                    f"{c} {owed[c] // 100}.{owed[c] % 100:02d}" for c in others
+                )
                 await message.reply(
-                    f"You don't owe anything in {currency}. "
-                    f"You have debts in: {others}. "
-                    "Specify an amount to settle in a different currency."
+                    f"The suggested settlement has you paying @{target_username} in "
+                    f"{detail}, not {currency}. Settle with an explicit amount in that currency."
                 )
             else:
                 await message.reply(
-                    f"You don't owe @{target_username} anything — your balance is already settled."
+                    f"The suggested settlement doesn't have you paying @{target_username}. "
+                    "Run /balance all to see who to pay."
                 )
             return
-
-        amount_cents = abs(payer_balance)
+        amount_cents = owed[currency]
 
     try:
         cmd = SettleUpCommand(
@@ -114,15 +106,16 @@ async def cmd_settleup(message: Message, command: CommandObject, uow: UnitOfWork
         return
 
     # settle_up raises ValueError with a user-facing message when the settlement
-    # breaks a ledger rule (e.g. you owe nothing, or the recipient isn't owed).
+    # breaks a ledger rule (no suggested payment to this person, or the amount
+    # exceeds what's owed).
     try:
-        result = await settle_up(uow, cmd)
+        result = await settle_up(uow, cmd, simplify_debts=group.simplify_debts)
     except ValueError as exc:
         await message.reply(str(exc))
         return
 
     major, minor = result.amount_cents // 100, result.amount_cents % 100
-    auto_note = " (full balance)" if amount_str is None else ""
+    auto_note = " (full amount owed)" if amount_str is None else ""
     await message.reply(
         f"Settled up: @{message.from_user.username or 'you'} paid "
         f"@{target_username} {result.currency} {major}.{minor:02d}{auto_note}"

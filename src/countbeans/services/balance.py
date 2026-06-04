@@ -107,3 +107,46 @@ def _simplified_transfers(balances: BalanceMap) -> list[Transfer]:
 
 def _raw_pairwise_transfers(balances: BalanceMap) -> list[Transfer]:
     return _greedy_transfers(balances, by_amount=False)
+
+
+def suggested_transfers(balances: BalanceMap, *, simplify_debts: bool) -> list[Transfer]:
+    """The same suggested-transfer set ``/balance all`` renders: the simplified
+    (reduced) set when the toggle is on, the raw pairwise set otherwise."""
+    suggest = _simplified_transfers if simplify_debts else _raw_pairwise_transfers
+    return suggest(balances)
+
+
+def suggested_owed_by_currency(
+    balances: BalanceMap,
+    from_id: uuid.UUID,
+    to_id: uuid.UUID,
+    *,
+    simplify_debts: bool,
+) -> dict[str, int]:
+    """Per-currency amounts ``from_id`` is suggested to pay ``to_id`` — the
+    single source of truth for "what you owe a specific person." Only currencies
+    with a suggested ``from_id -> to_id`` transfer appear (at most one transfer
+    per pair per currency, so values are unambiguous)."""
+    return {
+        t.currency: t.amount_cents
+        for t in suggested_transfers(balances, simplify_debts=simplify_debts)
+        if t.from_user_id == from_id and t.to_user_id == to_id
+    }
+
+
+def suggested_owed(
+    balances: BalanceMap,
+    from_id: uuid.UUID,
+    to_id: uuid.UUID,
+    currency: str,
+    *,
+    simplify_debts: bool,
+) -> int:
+    """How much ``from_id`` is suggested to pay ``to_id`` in ``currency`` (0 if
+    that settlement routes no payment between this pair). A greedy transfer never
+    exceeds either side's balance, so settling up to this amount can never flip a
+    balance (see CLAUDE.md "Debt simplification")."""
+    by_currency = suggested_owed_by_currency(
+        balances, from_id, to_id, simplify_debts=simplify_debts
+    )
+    return by_currency.get(currency, 0)
