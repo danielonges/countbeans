@@ -19,7 +19,7 @@ from countbeans.bot.handlers import (
     start,
     statements,
 )
-from countbeans.bot.middleware import TransactionalMiddleware
+from countbeans.bot.middleware import LoggingContextMiddleware, TransactionalMiddleware
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
 
@@ -61,6 +61,8 @@ async def run(token: str) -> None:
     dp = Dispatcher()
     # /statements paging arrives as callback queries, so the UoW middleware must
     # cover both update types — the callback handler issues reads too.
+    dp.message.middleware(LoggingContextMiddleware())
+    dp.callback_query.middleware(LoggingContextMiddleware())
     dp.message.middleware(TransactionalMiddleware(uow_factory))
     dp.callback_query.middleware(TransactionalMiddleware(uow_factory))
     dp.include_router(start.router)
