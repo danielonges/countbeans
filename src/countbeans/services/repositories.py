@@ -141,6 +141,18 @@ class BalanceRepository:
         )
         return {row.id: row.username for row in rows}
 
+    async def get_display_names(
+        self, user_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[str | None, str | None]]:
+        """(username, first_name) per id — lets the bot prefer @handle, fall back
+        to a first name, and avoid ever surfacing a raw UUID."""
+        if not user_ids:
+            return {}
+        rows = await self._session.execute(
+            select(User.id, User.username, User.first_name).where(User.id.in_(user_ids))
+        )
+        return {row.id: (row.username, row.first_name) for row in rows}
+
 
 class StatementRepository:
     """Reads the merged ledger (expenses + settlements) for /statements.

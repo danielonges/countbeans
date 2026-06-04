@@ -28,6 +28,7 @@ class MemberBalance(BaseModel):
 
     user_id: uuid.UUID
     username: str | None
+    first_name: str | None = None  # display fallback when there's no @username
     balance_cents: int  # positive = group owes them; negative = they owe the group
     currency: str
 

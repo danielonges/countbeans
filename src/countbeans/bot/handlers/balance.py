@@ -6,6 +6,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.dto.domain import MemberBalance
 from countbeans.services.balance import get_group_summary
 from countbeans.services.uow import UnitOfWork
 
@@ -24,9 +25,13 @@ def _amount(cents: int, currency: str) -> str:
     return f"{currency} {cents // 100}.{cents % 100:02d}"
 
 
-def _name(username_by_id: dict[uuid.UUID, str | None], uid: uuid.UUID) -> str:
-    username = username_by_id.get(uid)
-    return f"@{username}" if username else str(uid)
+def _display(member: MemberBalance) -> str:
+    """Prefer the @handle, fall back to a first name, never surface a raw UUID."""
+    if member.username:
+        return f"@{member.username}"
+    if member.first_name:
+        return member.first_name
+    return "someone"
 
 
 @router.message(Command("balance"))
@@ -50,7 +55,7 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     show_all = len(parts) > 1 and parts[1].lower() == "all"
 
     summary = await get_group_summary(uow, group.id, group.simplify_debts)
-    username_by_id = {b.user_id: b.username for b in summary.balances}
+    display_by_id: dict[uuid.UUID, str] = {b.user_id: _display(b) for b in summary.balances}
 
     if show_all:
         if not summary.balances:
@@ -59,15 +64,15 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
 
         lines = ["Group balances:"]
         for b in sorted(summary.balances, key=lambda x: -x.balance_cents):
-            lines.append(f"  {_name(username_by_id, b.user_id)}: {_fmt(b.balance_cents, b.currency)}")
+            lines.append(f"  {display_by_id[b.user_id]}: {_fmt(b.balance_cents, b.currency)}")
 
         if summary.suggested_transfers:
             heading = "simplified" if group.simplify_debts else "raw"
             lines.append(f"\nSuggested transfers ({heading}):")
             for t in summary.suggested_transfers:
                 lines.append(
-                    f"  {_name(username_by_id, t.from_user_id)} → "
-                    f"{_name(username_by_id, t.to_user_id)}: {_amount(t.amount_cents, t.currency)}"
+                    f"  {display_by_id[t.from_user_id]} → "
+                    f"{display_by_id[t.to_user_id]}: {_amount(t.amount_cents, t.currency)}"
                 )
 
         await message.reply("\n".join(lines))
@@ -93,8 +98,8 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     if owed_to_me or i_owe:
         lines.append(f"\nTo settle up ({heading}):")
     for t in owed_to_me:
-        lines.append(f"  {_name(username_by_id, t.from_user_id)} pays you {_amount(t.amount_cents, t.currency)}")
+        lines.append(f"  {display_by_id[t.from_user_id]} pays you {_amount(t.amount_cents, t.currency)}")
     for t in i_owe:
-        lines.append(f"  you pay {_name(username_by_id, t.to_user_id)} {_amount(t.amount_cents, t.currency)}")
+        lines.append(f"  you pay {display_by_id[t.to_user_id]} {_amount(t.amount_cents, t.currency)}")
 
     await message.reply("\n".join(lines))

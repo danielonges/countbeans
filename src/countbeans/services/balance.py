@@ -17,12 +17,13 @@ async def get_group_summary(
 ) -> GroupSummary:
     raw = await compute_balances(uow, group_id)
     user_ids = {key.user_id for key in raw}
-    username_map = await uow.balances.get_usernames(user_ids)
+    labels = await uow.balances.get_display_names(user_ids)
 
     balances = [
         MemberBalance(
             user_id=key.user_id,
-            username=username_map.get(key.user_id),
+            username=labels.get(key.user_id, (None, None))[0],
+            first_name=labels.get(key.user_id, (None, None))[1],
             balance_cents=cents,
             currency=key.currency,
         )
