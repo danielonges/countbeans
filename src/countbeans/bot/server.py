@@ -8,6 +8,7 @@ from countbeans.bot.handlers import (
     balance,
     currency,
     group,
+    join,
     settleup,
     simplify,
     start,
@@ -18,7 +19,8 @@ from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
 
 _COMMANDS = [
-    BotCommand(command="start",      description="Join the group and start tracking"),
+    BotCommand(command="start",      description="Set up the bot here (admin)"),
+    BotCommand(command="join",       description="Add yourself to expense tracking"),
     BotCommand(command="addexpense", description="Record an expense"),
     BotCommand(command="balance",    description="View your balance (or 'all' for everyone)"),
     BotCommand(command="settleup",   description="Record a payment to another member"),
@@ -43,6 +45,7 @@ async def run(token: str) -> None:
     dp.message.middleware(TransactionalMiddleware(uow_factory))
     dp.callback_query.middleware(TransactionalMiddleware(uow_factory))
     dp.include_router(start.router)
+    dp.include_router(join.router)
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
     dp.include_router(balance.router)

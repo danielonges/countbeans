@@ -232,13 +232,13 @@ class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def _by_telegram_id(self, telegram_user_id: int) -> User | None:
+    async def get_by_telegram_id(self, telegram_user_id: int) -> User | None:
         result = await self._session.execute(
             select(User).where(User.telegram_user_id == telegram_user_id)
         )
         return result.scalar_one_or_none()
 
-    async def _pending_placeholder(self, username: str) -> User | None:
+    async def pending_placeholder(self, username: str) -> User | None:
         """The pending placeholder for a username (telegram_user_id IS NULL), if
         any. App invariant: at most one per username."""
         result = await self._session.execute(
@@ -266,7 +266,7 @@ class UserRepository:
         "Onboarding & membership").
         """
         # Already a claimed identity: refresh the display alias and names.
-        existing = await self._by_telegram_id(telegram_user_id)
+        existing = await self.get_by_telegram_id(telegram_user_id)
         if existing is not None:
             existing.username = username
             existing.first_name = first_name
@@ -276,7 +276,7 @@ class UserRepository:
 
         # First interaction: claim a matching pending placeholder if present.
         if username is not None:
-            placeholder = await self._pending_placeholder(username)
+            placeholder = await self.pending_placeholder(username)
             if placeholder is not None:
                 placeholder.telegram_user_id = telegram_user_id
                 placeholder.first_name = first_name
@@ -388,7 +388,9 @@ class GroupMemberRepository:
             for u in rows.scalars()
         ]
 
-    async def ensure_member(self, group_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    async def ensure_member(self, group_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Add an active membership row if one doesn't exist. Returns True when a
+        new row was inserted, False when the user was already a member."""
         result = await self._session.execute(
             select(GroupMember).where(
                 GroupMember.group_id == group_id,
@@ -399,3 +401,5 @@ class GroupMemberRepository:
         if result.scalar_one_or_none() is None:
             self._session.add(GroupMember(group_id=group_id, user_id=user_id))
             await self._session.flush()
+            return True
+        return False

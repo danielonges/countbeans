@@ -13,17 +13,15 @@ currencies).
 import logging
 
 from aiogram import Bot, Router
-from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.permissions import is_admin
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-_ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
 
 
 @router.message(Command("currency"))
@@ -54,8 +52,7 @@ async def cmd_currency(message: Message, bot: Bot, uow: UnitOfWork) -> None:
         return
 
     # Changing the setting is admin-only.
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status not in _ADMIN_STATUSES:
+    if not await is_admin(bot, message.chat.id, message.from_user.id):
         await message.reply("Only group admins can change the default currency.")
         return
 

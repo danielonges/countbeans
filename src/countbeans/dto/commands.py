@@ -5,6 +5,22 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
+class OnboardUserCommand(BaseModel):
+    """Register the caller into a group's ledger (claiming a placeholder if one
+    waits). Unlike the other commands, this carries **raw Telegram IDs** rather
+    than resolved `users.id`/`groups.id` UUIDs: onboarding is the operation that
+    *creates* those rows, so there is nothing to pre-resolve."""
+
+    model_config = ConfigDict(frozen=True)
+
+    telegram_user_id: int
+    telegram_chat_id: int
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    group_name: str | None = None
+
+
 class SettleUpCommand(BaseModel):
     model_config = ConfigDict(frozen=True)
 

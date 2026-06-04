@@ -4,6 +4,21 @@ import uuid
 from pydantic import BaseModel, ConfigDict
 
 
+class OnboardResult(BaseModel):
+    """Outcome of onboarding a caller. `claimed_placeholder` is True when this
+    interaction claimed a pending placeholder (the caller had been @mentioned in
+    expenses before they ever interacted); `newly_added` is True when a fresh
+    group membership row was created (vs. already being a member)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    user_id: uuid.UUID
+    username: str | None
+    first_name: str | None
+    claimed_placeholder: bool
+    newly_added: bool
+
+
 class SettlementCreatedResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
