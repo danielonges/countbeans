@@ -7,9 +7,12 @@ balance. All SQL lives in the repositories; one transaction per command via the
 caller-managed UoW.
 """
 
+import logging
 import uuid
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID
+
+logger = logging.getLogger(__name__)
 
 from countbeans.db._mixins import _now
 from countbeans.db.models import Event
@@ -32,6 +35,12 @@ async def create_event(uow: UnitOfWork, cmd: CreateEventCommand) -> EventCreated
     group (the partial unique index would otherwise raise the raw violation), so
     close the current one first.
     """
+    logger.debug(
+        "create_event: group=%s name=%r currency=%s",
+        cmd.group_id,
+        cmd.name,
+        cmd.default_currency,
+    )
     if await uow.events.get_open(cmd.group_id) is not None:
         raise ValueError(
             "An event is already open — close it with /event close before starting another."
@@ -47,6 +56,7 @@ async def create_event(uow: UnitOfWork, cmd: CreateEventCommand) -> EventCreated
     await uow.events.create(event)
     await uow.events.ensure_member(event.id, cmd.created_by)
     await uow.groups.set_active_event(cmd.group_id, event.id)
+    logger.debug("create_event: created event_id=%s", event.id)
     return uow.events._to_result(event)
 
 
@@ -54,6 +64,13 @@ async def set_active_event(uow: UnitOfWork, cmd: SetActiveEventCommand) -> None:
     """Pause (event_id=None) or resume (the open event's id) auto-tagging. The
     event's open/closed status is unchanged — only the pointer moves. The bot
     validates that an open event exists before resuming."""
+    action = "resume" if cmd.event_id else "pause"
+    logger.debug(
+        "set_active_event: group=%s action=%s event=%s",
+        cmd.group_id,
+        action,
+        cmd.event_id,
+    )
     await uow.groups.set_active_event(cmd.group_id, cmd.event_id)
 
 
@@ -66,6 +83,9 @@ async def close_event(
     reference that open event (or be NULL), so clearing it on close is always
     correct. Closing never rolls the event's debts into the general balance — that
     would be a materialization the spec forbids (CLAUDE.md "Events")."""
+    logger.debug(
+        "close_event: group=%s event=%s status=%s", group_id, cmd.event_id, cmd.status
+    )
     closed_at = _now() if cmd.status == "closed" else None
     await uow.events.set_status(cmd.event_id, cmd.status, closed_at)
     if cmd.status == "closed":
@@ -75,6 +95,15 @@ async def close_event(
 async def edit_event_roster(uow: UnitOfWork, cmd: EditEventRosterCommand) -> bool:
     """Add or remove one user from an event's roster. Returns True when the roster
     actually changed (a no-op add/remove returns False)."""
+    logger.debug(
+        "edit_event_roster: event=%s action=%s user=%s",
+        cmd.event_id,
+        cmd.action,
+        cmd.user_id,
+    )
     if cmd.action == "add":
-        return await uow.events.ensure_member(cmd.event_id, cmd.user_id)
-    return await uow.events.remove_member(cmd.event_id, cmd.user_id)
+        changed = await uow.events.ensure_member(cmd.event_id, cmd.user_id)
+    else:
+        changed = await uow.events.remove_member(cmd.event_id, cmd.user_id)
+    logger.debug("edit_event_roster: changed=%s", changed)
+    return changed

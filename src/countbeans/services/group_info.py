@@ -1,6 +1,9 @@
 """Service for /group — assembles a read-only snapshot of a group."""
 
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from countbeans.dto.domain import GroupInfo
 
@@ -15,8 +18,12 @@ async def get_group_info(
     simplify_debts: bool,
     actual_count: int | None,
 ) -> GroupInfo:
+    logger.debug("get_group_info: group=%s", group_id)
     members = await uow.group_members.list_members(group_id)
     activity = await uow.expenses.activity_summary(group_id)
+    logger.debug(
+        "get_group_info: known_members=%d actual_count=%s", len(members), actual_count
+    )
     return GroupInfo(
         group_id=group_id,
         group_name=group_name,

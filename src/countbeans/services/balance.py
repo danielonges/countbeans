@@ -1,5 +1,6 @@
 """Balance query service — derives net balances from the immutable ledger."""
 
+import logging
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -8,10 +9,13 @@ from countbeans.dto.domain import BalanceMap, GroupSummary, MemberBalance, Trans
 
 from .uow import UnitOfWork
 
+logger = logging.getLogger(__name__)
+
 
 async def compute_balances(
     uow: UnitOfWork, group_id: uuid.UUID, *, event_id: uuid.UUID | None = None
 ) -> BalanceMap:
+    logger.debug("compute_balances: group=%s event=%s", group_id, event_id)
     return await uow.balances.compute_for_group(group_id, event_id=event_id)
 
 
@@ -22,6 +26,12 @@ async def get_group_summary(
     *,
     event_id: uuid.UUID | None = None,
 ) -> GroupSummary:
+    logger.debug(
+        "get_group_summary: group=%s event=%s simplify=%s",
+        group_id,
+        event_id,
+        simplify_debts,
+    )
     raw = await compute_balances(uow, group_id, event_id=event_id)
     user_ids = {key.user_id for key in raw}
     labels = await uow.balances.get_display_names(user_ids)
@@ -42,11 +52,17 @@ async def get_group_summary(
     # changes (see CLAUDE.md "Debt simplification").
     suggest = _simplified_transfers if simplify_debts else _raw_pairwise_transfers
 
-    return GroupSummary(
+    summary = GroupSummary(
         group_id=group_id,
         balances=balances,
         suggested_transfers=suggest(raw),
     )
+    logger.debug(
+        "get_group_summary: members=%d transfers=%d",
+        len(balances),
+        len(summary.suggested_transfers),
+    )
+    return summary
 
 
 @dataclass(slots=True)

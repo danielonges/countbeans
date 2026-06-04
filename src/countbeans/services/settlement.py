@@ -1,6 +1,9 @@
 """settle_up service function — records a settlement payment in the ledger."""
 
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
 
@@ -38,6 +41,15 @@ async def owed_by_currency(
 async def settle_up(
     uow: UnitOfWork, cmd: SettleUpCommand, *, simplify_debts: bool
 ) -> SettlementCreatedResult:
+    logger.debug(
+        "settle_up: group=%s from=%s to=%s amount=%d currency=%s event=%s",
+        cmd.group_id,
+        cmd.from_user_id,
+        cmd.to_user_id,
+        cmd.amount_cents,
+        cmd.currency,
+        cmd.event_id,
+    )
     if cmd.from_user_id == cmd.to_user_id:
         raise ValueError("from_user_id and to_user_id must be different users")
 
@@ -76,6 +88,7 @@ async def settle_up(
         currency=cmd.currency,
     )
     await uow.settlements.add(settlement)
+    logger.debug("settle_up: recorded settlement_id=%s", settlement_id)
     return uow.settlements._to_dto(settlement)
 
 
@@ -95,6 +108,7 @@ async def settle_all(
     /settleup — so the ledger stays a faithful audit trail (no special
     "everyone settled" marker). Admin-gating lives in the bot layer.
     """
+    logger.debug("settle_all: group=%s event=%s", group_id, event_id)
     balances = await uow.balances.compute_for_group(group_id, event_id=event_id)
     results: list[SettlementCreatedResult] = []
     for transfer in suggested_transfers(balances, simplify_debts=simplify_debts):
@@ -109,4 +123,5 @@ async def settle_all(
         )
         await uow.settlements.add(settlement)
         results.append(uow.settlements._to_dto(settlement))
+    logger.debug("settle_all: recorded %d settlements", len(results))
     return results

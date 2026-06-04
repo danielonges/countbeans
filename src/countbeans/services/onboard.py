@@ -6,7 +6,11 @@ one waits under the caller's @handle. Returns an OnboardResult carrying the two
 status flags the bot needs to compose a status-aware reply.
 """
 
+import logging
+
 from countbeans.dto.commands import OnboardUserCommand
+
+logger = logging.getLogger(__name__)
 from countbeans.dto.results import OnboardResult
 
 from .uow import UnitOfWork
@@ -16,6 +20,12 @@ async def onboard_member(uow: UnitOfWork, cmd: OnboardUserCommand) -> OnboardRes
     # Detect a placeholder claim BEFORE upsert mutates state: the caller is
     # unknown by telegram_id but a pending placeholder waits under their @handle.
     # upsert() performs the actual claim; this read just reports that it happened.
+    logger.debug(
+        "onboard_member: telegram_user_id=%s username=%s chat_id=%s",
+        cmd.telegram_user_id,
+        cmd.username,
+        cmd.telegram_chat_id,
+    )
     existing = await uow.users.get_by_telegram_id(cmd.telegram_user_id)
     claimed_placeholder = (
         existing is None
@@ -35,6 +45,12 @@ async def onboard_member(uow: UnitOfWork, cmd: OnboardUserCommand) -> OnboardRes
     )
     newly_added = await uow.group_members.ensure_member(group.id, user.id)
 
+    logger.debug(
+        "onboard_member: user_id=%s newly_added=%s claimed_placeholder=%s",
+        user.id,
+        newly_added,
+        claimed_placeholder,
+    )
     return OnboardResult(
         user_id=user.id,
         username=user.username,

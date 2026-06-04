@@ -1,6 +1,9 @@
 """add_expense service function with split-computation helpers."""
 
+import logging
 import uuid
+
+logger = logging.getLogger(__name__)
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
 
@@ -50,6 +53,8 @@ async def resolve_participants(
         await uow.events.ensure_member(event_id, payer_id)
 
     if _is_split_everyone(mentions):
+        scope = f"event={event_id}" if event_id else "group"
+        logger.debug("resolve_participants: split=everyone scope=%s", scope)
         if event_id is not None:
             return await uow.events.list_members(event_id)
         return await uow.group_members.list_members(group_id)
@@ -73,6 +78,7 @@ async def resolve_participants(
                 )
             )
             seen.add(user.id)
+    logger.debug("resolve_participants: split=named count=%d", len(participants))
     return participants
 
 
@@ -126,6 +132,15 @@ def compute_shares(
 
 
 async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreatedResult:
+    logger.debug(
+        "add_expense: group=%s payer=%s amount=%d currency=%s participants=%d event=%s",
+        cmd.group_id,
+        cmd.payer_id,
+        cmd.amount_cents,
+        cmd.currency,
+        len(cmd.participants),
+        cmd.event_id,
+    )
     shares = compute_shares(
         cmd.amount_cents, list(cmd.participants), cmd.split_mode, cmd.split_params
     )
@@ -141,6 +156,7 @@ async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreated
         created_by=cmd.created_by,
     )
     await uow.expenses.add(expense, shares)
+    logger.debug("add_expense: recorded expense_id=%s", expense_id)
     return ExpenseCreatedResult(
         expense_id=expense_id,
         group_id=cmd.group_id,

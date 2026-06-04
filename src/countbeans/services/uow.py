@@ -1,6 +1,10 @@
 """Caller-managed Unit of Work."""
 
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+logger = logging.getLogger(__name__)
 
 from .repositories import (
     BalanceRepository,
@@ -36,13 +40,16 @@ class UnitOfWork:
         self._session = self._session_factory()
         await self._session.__aenter__()
         self._attach(self._session)
+        logger.debug("transaction opened")
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         assert self._session is not None
         if exc_type is None:
             await self._session.commit()
+            logger.debug("transaction committed")
         else:
             await self._session.rollback()
+            logger.debug("transaction rolled back: %s", exc)
         await self._session.__aexit__(exc_type, exc, tb)
         self._session = None
