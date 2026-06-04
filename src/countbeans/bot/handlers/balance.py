@@ -7,7 +7,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.formatting import display_name
+from countbeans.bot.utils.formatting import display_name
 from countbeans.services.balance import get_group_summary
 from countbeans.services.uow import UnitOfWork
 

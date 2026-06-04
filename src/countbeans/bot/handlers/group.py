@@ -6,7 +6,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.formatting import display_name
+from countbeans.bot.utils.formatting import display_name
 from countbeans.services.group_info import get_group_info
 from countbeans.services.uow import UnitOfWork
 

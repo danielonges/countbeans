@@ -12,7 +12,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.permissions import is_admin
+from countbeans.bot.utils.permissions import is_admin
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)

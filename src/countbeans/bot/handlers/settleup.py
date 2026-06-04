@@ -23,9 +23,9 @@ from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.formatting import display_name
-from countbeans.bot.parsing import parse_amount_cents
-from countbeans.bot.permissions import is_admin
+from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.parsing import parse_amount_cents
+from countbeans.bot.utils.permissions import is_admin
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
 from countbeans.services.uow import UnitOfWork

@@ -22,8 +22,8 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.formatting import display_name
-from countbeans.bot.parsing import extract_quoted_description
+from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.parsing import extract_quoted_description
 from countbeans.db.models import Group
 from countbeans.dto.commands import (
     CreateEventCommand,

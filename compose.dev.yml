@@ -1,5 +1,7 @@
 services:
   bot:
+    environment:
+      COUNTBEANS_LOG_LEVEL: DEBUG
     volumes:
       - ./src:/app/src
     command: ["uv", "run", "watchfiles", "--filter", "python", "countbeans", "src/"]

@@ -15,7 +15,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.permissions import is_admin
+from countbeans.bot.utils.permissions import is_admin
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.services.onboard import onboard_member
 from countbeans.services.uow import UnitOfWork

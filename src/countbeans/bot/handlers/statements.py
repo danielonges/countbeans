@@ -24,7 +24,7 @@ from aiogram.types import (
     Message,
 )
 
-from countbeans.bot.formatting import display_name
+from countbeans.bot.utils.formatting import display_name
 from countbeans.dto.domain import StatementEntry, StatementPage
 from countbeans.services.statements import get_statement_page
 from countbeans.services.uow import UnitOfWork

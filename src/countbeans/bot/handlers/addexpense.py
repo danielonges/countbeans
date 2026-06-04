@@ -15,8 +15,8 @@ from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.formatting import display_name
-from countbeans.bot.parsing import extract_quoted_description, parse_money
+from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.parsing import extract_quoted_description, parse_money
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.uow import UnitOfWork

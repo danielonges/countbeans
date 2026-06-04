@@ -2,7 +2,7 @@
 
 import pytest
 
-from countbeans.bot.parsing import parse_money
+from countbeans.bot.utils.parsing import parse_money
 
 
 def test_bare_number_uses_default_currency():

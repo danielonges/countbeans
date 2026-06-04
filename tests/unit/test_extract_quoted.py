@@ -1,6 +1,6 @@
 """Unit tests for extract_quoted_description — flexible quoted descriptions."""
 
-from countbeans.bot.parsing import extract_quoted_description
+from countbeans.bot.utils.parsing import extract_quoted_description
 
 
 def test_straight_double_quotes() -> None:

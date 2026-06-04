@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from aiogram.enums import ChatMemberStatus
 
-from countbeans.bot.permissions import is_admin
+from countbeans.bot.utils.permissions import is_admin
 
 
 class _FakeBot:
