@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, User
 from countbeans.dto.commands import AddExpenseCommand
-from countbeans.services.add_expense import add_expense
+from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.repositories import (
     ExpenseRepository,
     GroupMemberRepository,
@@ -123,3 +123,77 @@ async def test_balance_sum_to_zero(session: AsyncSession) -> None:
     alice_balance = 100 - result.shares[alice.id]
     bob_balance = -result.shares[bob.id]
     assert alice_balance + bob_balance == 0
+
+
+async def _seed_named(
+    session: AsyncSession, usernames: list[str]
+) -> tuple[Group, list[User]]:
+    group = _make_group()
+    users = [
+        _make_user(username=name, telegram_user_id=1000 + i)
+        for i, name in enumerate(usernames)
+    ]
+    session.add(group)
+    session.add_all(users)
+    await session.flush()
+    session.add_all([GroupMember(group_id=group.id, user_id=u.id) for u in users])
+    await session.flush()
+    return group, users
+
+
+async def test_resolve_participants_no_mentions_splits_everyone(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed(session)
+    uow = _SessionUoW(session)
+
+    parts = await resolve_participants(uow, group.id, alice.id, [])  # type: ignore[arg-type]
+    assert {p.user_id for p in parts} == {alice.id, bob.id}
+
+
+async def test_resolve_participants_all_keyword_splits_everyone(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed(session)
+    uow = _SessionUoW(session)
+
+    parts = await resolve_participants(uow, group.id, alice.id, ["all"])  # type: ignore[arg-type]
+    assert {p.user_id for p in parts} == {alice.id, bob.id}
+
+
+async def test_resolve_participants_named_excludes_payer(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed_named(session, ["alice", "bob"])
+    uow = _SessionUoW(session)
+
+    # alice (the payer) names only bob → only bob participates; alice is excluded.
+    parts = await resolve_participants(uow, group.id, alice.id, ["bob"])  # type: ignore[arg-type]
+    assert [p.user_id for p in parts] == [bob.id]
+
+
+async def test_resolve_participants_self_mention_includes_payer(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed_named(session, ["alice", "bob"])
+    uow = _SessionUoW(session)
+
+    # Mentioning yourself opts you back in.
+    parts = await resolve_participants(uow, group.id, alice.id, ["alice", "bob"])  # type: ignore[arg-type]
+    assert {p.user_id for p in parts} == {alice.id, bob.id}
+
+
+async def test_resolve_participants_unknown_handle_becomes_placeholder(session: AsyncSession) -> None:
+    group, (alice,) = await _seed_named(session, ["alice"])
+    uow = _SessionUoW(session)
+
+    parts = await resolve_participants(uow, group.id, alice.id, ["charlie"])  # type: ignore[arg-type]
+    assert len(parts) == 1
+    assert parts[0].username == "charlie"
+    assert parts[0].is_pending is True  # placeholder: telegram_user_id IS NULL
+
+    # A pending placeholder row was actually created.
+    placeholder = (
+        await session.execute(select(User).where(User.username == "charlie"))
+    ).scalar_one()
+    assert placeholder.telegram_user_id is None
+
+
+async def test_resolve_participants_deduplicates(session: AsyncSession) -> None:
+    group, (alice, bob) = await _seed_named(session, ["alice", "bob"])
+    uow = _SessionUoW(session)
+
+    parts = await resolve_participants(uow, group.id, alice.id, ["bob", "bob"])  # type: ignore[arg-type]
+    assert [p.user_id for p in parts] == [bob.id]

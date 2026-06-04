@@ -1,17 +1,23 @@
 """Bot handler for the /addexpense command.
 
 Parses: /addexpense <amount> ["<description>"] [@user1 @user2 ...]
+
+Participant rules (see CLAUDE.md "Splitting an expense"):
+  * no @mentions (or @all)  → split among everyone the bot knows in the group;
+  * one or more @mentions   → split among only those named (you are NOT
+    included unless you @mention yourself).
 """
 import logging
 import re
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from countbeans.bot.formatting import display_name
 from countbeans.bot.parsing import parse_money
 from countbeans.dto.commands import AddExpenseCommand
-from countbeans.services.add_expense import add_expense
+from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -20,15 +26,23 @@ router = Router()
 
 _MENTION_RE = re.compile(r"@([\w.]+)")
 _USAGE = (
-    'Usage: /addexpense <amount> ["description"] [@user1 @user2 ...]\n'
+    'Usage: /addexpense <amount> ["description"] [@user ...]\n'
     'Example: /addexpense 25.50 "Dinner" @alice @bob\n'
-    "Prefix the amount with a currency to override the group default: "
-    "$50, €50, USD50."
+    "• No @mentions (or @all) → split among everyone in the group.\n"
+    "• Name people → split among only them; you're not included unless you "
+    "@mention yourself.\n"
+    "Prefix the amount with a currency to override the default: $50, €50, USD50."
 )
 
 
+def _money(cents: int, currency: str) -> str:
+    return f"{currency} {cents // 100}.{cents % 100:02d}"
+
+
 @router.message(Command("addexpense"))
-async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWork) -> None:
+async def cmd_addexpense(
+    message: Message, command: CommandObject, uow: UnitOfWork, bot: Bot
+) -> None:
     if message.from_user is None:
         return
 
@@ -71,19 +85,7 @@ async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWo
         rest = rest[: quoted.start()] + rest[quoted.end() :]
 
     mentions = _MENTION_RE.findall(rest)
-
-    participant_users = [payer]
-    seen_ids = {payer.id}
-    for handle in mentions:
-        if handle == (message.from_user.username or ""):
-            continue
-        u = await uow.users.resolve_mention(handle)
-        if u.id not in seen_ids:
-            participant_users.append(u)
-            seen_ids.add(u.id)
-
-    for u in participant_users:
-        await uow.group_members.ensure_member(group.id, u.id)
+    participants = await resolve_participants(uow, group.id, payer.id, mentions)
 
     try:
         cmd = AddExpenseCommand(
@@ -92,7 +94,7 @@ async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWo
             amount_cents=amount_cents,
             currency=currency,
             description=description,
-            participants=[u.id for u in participant_users],
+            participants=[p.user_id for p in participants],
             created_by=payer.id,
         )
     except Exception as exc:
@@ -108,24 +110,33 @@ async def cmd_addexpense(message: Message, command: CommandObject, uow: UnitOfWo
         await message.reply(str(exc))
         return
 
-    major, minor = result.amount_cents // 100, result.amount_cents % 100
-    payer_name = f"@{payer.username}" if payer.username else "you"
-    participant_names = [
-        f"@{u.username}" if u.username else str(u.id) for u in participant_users
+    lines = [
+        f"Added expense: {description or 'expense'} — {_money(result.amount_cents, result.currency)}",
+        f"Paid by: {display_name(payer.username, payer.first_name)}",
+        f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
+        "Shares:",
     ]
-    share_lines = [
-        f"  {name}: {result.currency} {result.shares.get(u.id, 0) // 100}.{result.shares.get(u.id, 0) % 100:02d}"
-        for u, name in zip(participant_users, participant_names)
-    ]
+    for p in participants:
+        lines.append(f"  {display_name(p.username, p.first_name)}: {_money(result.shares.get(p.user_id, 0), result.currency)}")
 
-    await message.reply(
-        f"Added expense: {description or 'expense'} — {result.currency} {major}.{minor:02d}\n"
-        f"Paid by: {payer_name}\n"
-        f"Split among: {', '.join(participant_names)}\n"
-        f"Shares:\n" + "\n".join(share_lines)
-    )
+    # When splitting the whole group, warn if the bot can't see everyone — it
+    # can only split among members who've interacted (CLAUDE.md "Onboarding").
+    if not mentions or all(h.lower() == "all" for h in mentions):
+        try:
+            actual = await bot.get_chat_member_count(message.chat.id) - 1  # minus the bot
+            if len(participants) < actual:
+                gap = actual - len(participants)
+                lines.append(
+                    f"\n⚠️ Split among the {len(participants)} member(s) I know — "
+                    f"{gap} more haven't interacted yet. Ask them to /start to be included."
+                )
+        except Exception:
+            logger.warning("could not fetch chat member count for %s", message.chat.id)
+
+    await message.reply("\n".join(lines))
     logger.info(
-        "Expense recorded: expense_id=%s amount_cents=%d",
+        "Expense recorded: expense_id=%s amount_cents=%d participants=%d",
         result.expense_id,
         result.amount_cents,
+        len(participants),
     )

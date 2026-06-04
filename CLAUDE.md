@@ -227,7 +227,7 @@ These cut across the whole data model and are the reason the schema below differ
 
 ### Key commands
 
-- `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among the named users plus the payer; omit mentions (or use `@all`) to split with the whole group. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
+- `/addexpense <amount> "<desc>" [@user …]` — record an expense. Splits among **only the named users** (the payer is excluded unless they `@mention` themselves); omit mentions (or use `@all`) to split among the whole group, payer included. Per-user suffixes pick the split mode — `@a:30` exact amount, `@a:60%` percentage, `@a:2x` weight (see "Splitting an expense").
 - `/balance [all]` — `/balance` shows the caller's own net position with other members; `/balance all` shows **every member's** net balance (per currency) plus the suggested settle-up transfers. Both are derived from the ledger. The suggested transfers honor the group's **debt-simplification setting**: when on, they are the simplified (reduced) set; when off, they are the raw pairwise debts. The per-member net balances are identical either way — the toggle only changes how the *suggested transfers* are presented. When an event is active, `/balance` defaults to that event's scope; a scope can be named read-only (`/balance general`, `/balance "<event>"`) to peek at another without ending the active one (see "Events").
 - `/settleup` — record a settlement payment (full or partial) from one user to another, e.g. `/settleup @user1 20`. While an event is active it auto-tags the settlement to that event (writes are strictly active-scoped); settle a *general* debt by `/event pause`-ing first (the event stays open).
 - `/simplify [on|off]` — view or change the group's debt-simplification setting. `/simplify` with no argument reports the current state (any member). `/simplify on` / `/simplify off` flips it and is **admin-only**: the bot checks the caller via `getChatMember` and refuses (no state change) unless their status is `creator` or `administrator`. The setting is purely presentational — see "Debt simplification".
@@ -412,9 +412,11 @@ A split is two independent choices: **who** is in it (participant selection) and
 
 **Participant selection** — splitting with only some of the group:
 
-- **Named subset (default):** `/addexpense 50 Dinner @a @b` splits among the named users **plus the payer**. This is how you split with only selected people — only those listed (and the payer) get a share.
-- **Everyone:** with no mentions (or an `@all` keyword), split across all current members from `group_members` (pending placeholders included). Because the bot can't enumerate the real roster, `@all` means "everyone the bot knows" — see the coverage check below.
-- **Excluding the payer:** the payer is included by default; excluding them (they paid but didn't partake) just drops their share, leaving them owed the full amount.
+- **Named subset:** `/addexpense 50 Dinner @a @b` splits among **only the named users** — the payer is **not** added automatically. This is the "I paid, these people owe me" case: `/addexpense 25.50 Lunch @a` leaves `@a` owing the full 25.50 and the payer owed it. Mention yourself (`@a @me`) to be included in the split.
+- **Everyone:** with no mentions (or an `@all` keyword), split across all current members from `group_members` (the payer included, pending placeholders included). Because the bot can't enumerate the real roster, `@all` means "everyone the bot knows" — see the coverage check below.
+- **Including the payer:** the payer is a participant only in the "everyone" case or when they `@mention` themselves; otherwise they paid but didn't partake, so they get no share and are owed the full amount.
+
+(Resolution lives in `resolve_participants` in `services/add_expense.py`; the bot passes the parsed `@handles` and gets back the participant `MemberInfo` list.)
 
 **Split modes** — dividing the amount unevenly:
 
@@ -477,7 +479,7 @@ def add_expense(group_id, payer_id, amount_cents, currency, description,
     return expense_id
 ```
 
-The payer is just another participant: their share is computed like anyone else's, and their net position (paid − consumed) falls out of the balance formula. Excluding the payer simply means they get no `expense_shares` row.
+At the service level the payer is just another participant *when included*: their share is computed like anyone else's, and their net position (paid − consumed) falls out of the balance formula. When the payer is not a participant (the default for a named split — see "Participant selection") they simply get no `expense_shares` row, so they are owed the full amount. Whether to include the payer is decided one layer up, in `resolve_participants`; `compute_shares` only ever sees the final participant list.
 
 ### Command parsing & validation
 
@@ -501,8 +503,8 @@ Parse first, then validate:
    - All suffixes end in `x` → **weighted**.
    - All suffixes are bare numbers → **exact**; must sum to the amount.
    - **Mixing families is rejected** (`@a:30 @b:40%` → error), and in any non-equal mode **every** participant must carry a suffix of that family (`@a:60% @b` → error).
-4. **Participants** — duplicate handles are rejected. The payer is added automatically (deduped if they also @mention themselves); an explicit exclude flag drops the payer's share.
-5. **`@all`** — must appear alone with no suffixes; splits equally across all current `group_members` (placeholders included). Omitting mentions entirely is equivalent to `@all`. Since the bot cannot enumerate the real roster, it runs a **coverage check** and **blocks until confirmed** on any gap (see below).
+4. **Participants** — naming one or more @handles splits among **only those users**; the payer is **not** added automatically (mention yourself to be included). With no @mentions, split among everyone the bot knows. Duplicate handles are deduplicated.
+5. **`@all`** — splits equally across all current `group_members` (the payer and placeholders included). Omitting mentions entirely is equivalent to `@all`. Since the bot cannot enumerate the real roster, it compares known members against `getChatMemberCount` (see below). *Current implementation:* it splits among the members it knows and **appends a non-blocking warning** when there's a gap; the full **block-until-confirmed** FSM flow described below is the intended design and remains future work.
 6. **Unknown handles are not errors** — they become pending placeholders (see Onboarding).
 7. Fractional percentages (≤2 dp) are carried as integer **basis points** (sum must be 10000) so `apportion` stays integer-only.
 

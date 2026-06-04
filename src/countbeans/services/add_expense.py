@@ -5,11 +5,63 @@ import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydan
 
 from countbeans.db.models import Expense
 from countbeans.dto.commands import AddExpenseCommand
+from countbeans.dto.domain import MemberInfo
 from countbeans.dto.results import ExpenseCreatedResult
 
 from .uow import UnitOfWork
 
 Id = uuid.UUID
+
+
+def _is_split_everyone(mentions: list[str]) -> bool:
+    """True when an expense should split among the whole group: no @mentions at
+    all, or only the @all keyword."""
+    return not any(h.lower() != "all" for h in mentions)
+
+
+async def resolve_participants(
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    payer_id: uuid.UUID,
+    mentions: list[str],
+) -> list[MemberInfo]:
+    """Resolve who an expense is split among, from the raw @handles parsed off
+    the command.
+
+    * **No named mentions** (none at all, or only ``@all``) → every member the
+      bot knows in the group, the payer included.
+    * **Named mentions** → exactly those users; the payer is **not** added
+      automatically — mention yourself to be included. Unknown handles become
+      pending placeholders.
+
+    The payer is always ensured to be a group member first (so a "split
+    everyone" reflects them, and a payer who only ever pays still appears in the
+    roster). Returns one MemberInfo per participant, deduplicated, order
+    preserved.
+    """
+    await uow.group_members.ensure_member(group_id, payer_id)
+
+    if _is_split_everyone(mentions):
+        return await uow.group_members.list_members(group_id)
+
+    participants: list[MemberInfo] = []
+    seen: set[uuid.UUID] = set()
+    for handle in mentions:
+        if handle.lower() == "all":
+            continue
+        user = await uow.users.resolve_mention(handle)
+        await uow.group_members.ensure_member(group_id, user.id)
+        if user.id not in seen:
+            participants.append(
+                MemberInfo(
+                    user_id=user.id,
+                    username=user.username,
+                    first_name=user.first_name,
+                    is_pending=user.telegram_user_id is None,
+                )
+            )
+            seen.add(user.id)
+    return participants
 
 
 def apportion(amount_cents: int, weights: dict[Id, int]) -> dict[Id, int]:
