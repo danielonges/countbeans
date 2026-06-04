@@ -31,8 +31,9 @@ _USAGE = (
     "• No @mentions (or @all) → split among everyone in the group.\n"
     "• Name people → split among only them; you're not included unless you "
     "@mention yourself.\n"
-    "• Quote the description with any matching pair — \"…\", '…', or curly "
-    "“…”/‘…’ (handy on phones). Escape a quote inside with a backslash: "
+    "\u2022 Quote the description with any matching pair \u2014 \"...\", '...', "
+    "\u201c...\u201d/\u2018...\u2019 (curly, handy on phones), "
+    "\u00ab...\u00bb, or `...`. Escape a quote inside with a backslash: "
     '"she said \\"hi\\"".\n'
     "Prefix the amount with a currency to override the default: $50, €50, USD50."
 )
