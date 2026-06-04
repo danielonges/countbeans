@@ -31,11 +31,11 @@ _USAGE = (
     "• No @mentions (or @all) → split among everyone in the group.\n"
     "• Name people → split among only them; you're not included unless you "
     "@mention yourself.\n"
-    "\u2022 Quote the description with any matching pair \u2014 \"...\", '...', "
-    "\u201c...\u201d/\u2018...\u2019 (curly, handy on phones), "
-    "\u00ab...\u00bb, or `...`. Escape a quote inside with a backslash: "
+    "• Quote the description with any matching pair — \"...\", '...', "
+    "“...”/‘...’ (curly, handy on phones), "
+    "«...», or `...`. Escape a quote inside with a backslash: "
     '"she said \\"hi\\"".\n'
-    "Prefix the amount with a currency to override the default: $50, €50, USD50."
+    "• Prefix the amount with a currency to override the default: $50, €50, USD50."
 )
 
 
@@ -112,7 +112,9 @@ async def cmd_addexpense(
         return
 
     lines = [
-        f"Added expense: {description or 'expense'} — {_money(result.amount_cents, result.currency)}",
+        f"Added expense: {description} — {_money(result.amount_cents, result.currency)}"
+        if description
+        else f"Added expense — {_money(result.amount_cents, result.currency)}",
         f"Paid by: {display_name(payer.username, payer.first_name)}",
         f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
         "Shares:",
