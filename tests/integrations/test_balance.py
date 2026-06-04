@@ -3,6 +3,7 @@
 Uses an ephemeral Postgres container (Testcontainers via conftest.py).
 Each test rolls back via the session fixture.
 """
+import uuid
 from datetime import datetime, timezone
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
@@ -202,3 +203,72 @@ async def test_set_simplify_debts_persists(session: AsyncSession) -> None:
     await repo.set_simplify_debts(group.id, False)
     await session.refresh(group)  # reload from DB to confirm it persisted
     assert group.simplify_debts is False
+
+
+async def test_partial_settlement_then_simplify_flip_preserves_balances(
+    session: AsyncSession,
+) -> None:
+    """A partial settlement made while simplify is ON, then viewed with it OFF,
+    must not move any net balance. The toggle is presentation-only and operates
+    on the *current* ledger, so a settlement (full or partial, recorded under
+    either mode) just adds a ledger event that already moved balances before the
+    flip — equality against the never-toggled baseline holds (CLAUDE.md "Debt
+    simplification"). Uses a 4-party case where simplified and raw suggestions
+    genuinely differ, so the flip is exercised, not degenerate."""
+    group, users = await _seed(session, n=4)
+    a, b, c, d = sorted(users, key=lambda u: u.id)  # deterministic id order a<b<c<d
+
+    # Net baseline: a -100, b -900, c +900, d +100.
+    e1 = _expense(group, c, 1000)
+    session.add(e1)
+    await session.flush()
+    session.add_all([_share(e1, a, 100), _share(e1, b, 900)])
+    e2 = _expense(group, d, 100)
+    session.add(e2)
+    await session.flush()
+    session.add_all([_share(e2, c, 100)])
+    await session.flush()
+
+    uow = _SessionUoW(session)
+    baseline = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert baseline == {
+        BalanceKey(a.id, "SGD"): -100,
+        BalanceKey(b.id, "SGD"): -900,
+        BalanceKey(c.id, "SGD"): 900,
+        BalanceKey(d.id, "SGD"): 100,
+    }
+
+    # Partial settlement recorded while simplify is ON (suggested b->c was 900).
+    session.add(_settlement(group, b, c, 500))
+    await session.flush()
+
+    after = await compute_balances(uow, group.id)  # type: ignore[arg-type]
+    assert after == {
+        BalanceKey(a.id, "SGD"): -100,
+        BalanceKey(b.id, "SGD"): -400,
+        BalanceKey(c.id, "SGD"): 400,
+        BalanceKey(d.id, "SGD"): 100,
+    }
+    assert after != baseline  # the settlement actually moved balances
+
+    on = await get_group_summary(uow, group.id, simplify_debts=True)  # type: ignore[arg-type]
+    off = await get_group_summary(uow, group.id, simplify_debts=False)  # type: ignore[arg-type]
+
+    def as_map(summary: object) -> dict[tuple[uuid.UUID, str], int]:
+        return {(mb.user_id, mb.currency): mb.balance_cents for mb in summary.balances}  # type: ignore[attr-defined]
+
+    # The load-bearing invariant: per-member balances are identical under either
+    # toggle and equal the ledger-derived figures — flipping changes nothing.
+    expected = {(k.user_id, k.currency): v for k, v in after.items()}
+    assert as_map(on) == expected
+    assert as_map(off) == expected
+    assert sum(after.values()) == 0  # per-currency sum stays zero
+
+    # Both suggested sets fully settle the *remaining* balances; simplified is
+    # never larger; and the two sets genuinely differ (the flip is meaningful).
+    assert _settles(after, on.suggested_transfers)
+    assert _settles(after, off.suggested_transfers)
+    assert len(on.suggested_transfers) <= len(off.suggested_transfers)
+    assert {(t.from_user_id, t.to_user_id, t.amount_cents) for t in on.suggested_transfers} != {
+        (t.from_user_id, t.to_user_id, t.amount_cents) for t in off.suggested_transfers
+    }
