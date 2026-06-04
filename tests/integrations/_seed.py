@@ -5,6 +5,7 @@ test can set up "two members with a debt between them" before driving a command.
 Everything uses DEFAULT_CHAT_ID so the group a handler upserts is the same one
 seeded here.
 """
+
 import uuid
 
 from sqlalchemy import select

@@ -8,6 +8,7 @@ Covers the three reply-driving outcomes: a fresh member (newly added), claiming
 a pending placeholder (the @mentioned-but-unseen case), and an idempotent repeat
 (already a member).
 """
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,9 +82,9 @@ async def test_onboard_is_idempotent(session: AsyncSession) -> None:
     # No duplicate membership row.
     count = (
         await session.execute(
-            select(func.count()).select_from(GroupMember).where(
-                GroupMember.user_id == first.user_id
-            )
+            select(func.count())
+            .select_from(GroupMember)
+            .where(GroupMember.user_id == first.user_id)
         )
     ).scalar_one()
     assert count == 1

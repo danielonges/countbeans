@@ -14,6 +14,7 @@ transfer at once to zero the whole group, and is restricted to group admins.
 A normal mention must resolve to *someone already known* — a typo'd handle is
 rejected rather than spawning a stray placeholder.
 """
+
 import logging
 import re
 import uuid
@@ -74,7 +75,9 @@ async def cmd_settleup(
 
     # Active-event mode: settle within the active event's scope (writes are
     # strictly active-scoped — /event pause to settle a general debt). CLAUDE.md.
-    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    active = (
+        await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
     event_id = active.id if active else None
     scope_note = f' in "{active.name}"' if active else ""
 
@@ -101,7 +104,9 @@ async def cmd_settleup(
         try:
             amount_cents = parse_amount_cents(amount_str)
         except ValueError:
-            await message.reply("Invalid amount. Please use a positive number, e.g. 25.50")
+            await message.reply(
+                "Invalid amount. Please use a positive number, e.g. 25.50"
+            )
             return
     else:
         # Auto-fill: settle the full suggested you→them transfer in the default
@@ -189,12 +194,18 @@ async def _settle_whole_group(
     zeroes that event's scope, not the general ledger."""
     assert message.from_user is not None
     if not await is_admin(bot, message.chat.id, message.from_user.id):
-        await message.reply("Only group admins can settle up the whole group (/settleup @all).")
+        await message.reply(
+            "Only group admins can settle up the whole group (/settleup @all)."
+        )
         return
 
-    results = await settle_all(uow, group_id, simplify_debts=simplify_debts, event_id=event_id)
+    results = await settle_all(
+        uow, group_id, simplify_debts=simplify_debts, event_id=event_id
+    )
     if not results:
-        await message.reply(f"Everyone's already settled up{scope_note} — nothing to record.")
+        await message.reply(
+            f"Everyone's already settled up{scope_note} — nothing to record."
+        )
         return
 
     ids = {r.from_user_id for r in results} | {r.to_user_id for r in results}
@@ -204,9 +215,13 @@ async def _settle_whole_group(
         username, first_name = names.get(uid, (None, None))
         return display_name(username, first_name)
 
-    lines = [f"✅ Settled up the whole group{scope_note} — {len(results)} transfer(s) recorded:"]
+    lines = [
+        f"✅ Settled up the whole group{scope_note} — {len(results)} transfer(s) recorded:"
+    ]
     for r in results:
-        lines.append(f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {_money(r.amount_cents, r.currency)}")
+        lines.append(
+            f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {_money(r.amount_cents, r.currency)}"
+        )
     await message.reply("\n".join(lines))
     logger.info(
         "Group settle-up by user=%s in group=%s: %d settlements",

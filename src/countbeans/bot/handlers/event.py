@@ -13,6 +13,7 @@ Subcommands (any member may run these):
 Scope is durable, shared group state (`groups.active_event_id`), not aiogram FSM
 (CLAUDE.md "Events"). The full /event list & info command is deferred.
 """
+
 import logging
 import re
 import uuid
@@ -57,7 +58,9 @@ _USAGE = (
 
 
 def _roster_str(members: list[MemberInfo]) -> str:
-    return ", ".join(display_name(m.username, m.first_name) for m in members) or "(empty)"
+    return (
+        ", ".join(display_name(m.username, m.first_name) for m in members) or "(empty)"
+    )
 
 
 @router.message(Command("event"))
@@ -139,7 +142,9 @@ async def _pause(message: Message, uow: UnitOfWork, group: Group) -> None:
 async def _resume(message: Message, uow: UnitOfWork, group: Group) -> None:
     open_event = await uow.events.get_open(group.id)
     if open_event is None:
-        await message.reply('No open event to resume. Start one with /event new "<name>".')
+        await message.reply(
+            'No open event to resume. Start one with /event new "<name>".'
+        )
         return
     if group.active_event_id == open_event.id:
         await message.reply(f'"{open_event.name}" is already active.')
@@ -147,7 +152,9 @@ async def _resume(message: Message, uow: UnitOfWork, group: Group) -> None:
     await set_active_event(
         uow, SetActiveEventCommand(group_id=group.id, event_id=open_event.id)
     )
-    await message.reply(f'▶️ Resumed "{open_event.name}". New expenses tag to it again.')
+    await message.reply(
+        f'▶️ Resumed "{open_event.name}". New expenses tag to it again.'
+    )
 
 
 async def _close(message: Message, uow: UnitOfWork, group: Group) -> None:
@@ -184,7 +191,9 @@ async def _roster(
         await uow.group_members.ensure_member(group.id, user.id)
         changed = await edit_event_roster(
             uow,
-            EditEventRosterCommand(event_id=open_event.id, user_id=user.id, action="add"),
+            EditEventRosterCommand(
+                event_id=open_event.id, user_id=user.id, action="add"
+            ),
         )
         note = (
             f'Added @{handle} to "{open_event.name}".'
@@ -217,7 +226,9 @@ async def _status(message: Message, uow: UnitOfWork, group: Group) -> None:
         active = await uow.events.get(group.active_event_id)
         if active is not None:
             roster = await uow.events.list_members(active.id)
-            lines.append(f'\nActive event: "{active.name}" — roster: {_roster_str(roster)}')
+            lines.append(
+                f'\nActive event: "{active.name}" — roster: {_roster_str(roster)}'
+            )
     else:
         open_event = await uow.events.get_open(group.id)
         if open_event is not None:

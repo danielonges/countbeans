@@ -1,4 +1,5 @@
 """Unit tests for the shared display_name helper: @handle → first name → generic."""
+
 from countbeans.bot.formatting import display_name
 
 

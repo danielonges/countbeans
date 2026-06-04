@@ -8,6 +8,7 @@ they were @mentioned in an expense before they ever interacted — see CLAUDE.md
 they were newly added, already in, or just linked to earlier mentions. In a
 private chat there is nothing to join.
 """
+
 import logging
 
 from aiogram import F, Router

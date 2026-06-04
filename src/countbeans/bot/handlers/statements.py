@@ -10,6 +10,7 @@ that user's taps page it (anyone may still read the group view).
 Replies are plain text on purpose — @usernames contain underscores, which a
 Markdown parse would mangle into italics.
 """
+
 import logging
 import math
 
@@ -66,9 +67,17 @@ def _keyboard(page: StatementPage, cb_prefix: str) -> InlineKeyboardMarkup | Non
     pages = math.ceil(page.total / page.page_size) if page.total else 1
     row: list[InlineKeyboardButton] = []
     if page.page > 0:
-        row.append(InlineKeyboardButton(text="◀ Prev", callback_data=f"{cb_prefix}:{page.page - 1}"))
+        row.append(
+            InlineKeyboardButton(
+                text="◀ Prev", callback_data=f"{cb_prefix}:{page.page - 1}"
+            )
+        )
     if page.page < pages - 1:
-        row.append(InlineKeyboardButton(text="Next ▶", callback_data=f"{cb_prefix}:{page.page + 1}"))
+        row.append(
+            InlineKeyboardButton(
+                text="Next ▶", callback_data=f"{cb_prefix}:{page.page + 1}"
+            )
+        )
     return InlineKeyboardMarkup(inline_keyboard=[row]) if row else None
 
 
@@ -126,7 +135,9 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
     elif scope == "u":
         subject_tg, page_no = int(parts[2]), int(parts[3])
         if callback.from_user.id != subject_tg:
-            await callback.answer("That's not your statement — run /statements me.", show_alert=True)
+            await callback.answer(
+                "That's not your statement — run /statements me.", show_alert=True
+            )
             return
         viewer = await uow.users.upsert(
             telegram_user_id=callback.from_user.id,
@@ -141,7 +152,9 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
         return
 
     try:
-        await callback.message.edit_text(_render(page, title), reply_markup=_keyboard(page, cb_prefix))
+        await callback.message.edit_text(
+            _render(page, title), reply_markup=_keyboard(page, cb_prefix)
+        )
     except TelegramBadRequest:
         # "message is not modified" — e.g. a double-tap on the same page. Harmless.
         pass

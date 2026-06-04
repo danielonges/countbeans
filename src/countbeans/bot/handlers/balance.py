@@ -1,4 +1,5 @@
 """Bot handler for /balance and /balance all."""
+
 import logging
 import uuid
 
@@ -47,7 +48,9 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
 
     # /balance defaults to the active event's scope (general when none is active).
     # Named cross-scope reads (/balance general, /balance "<event>") are deferred.
-    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    active = (
+        await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
     scope_in = f' in "{active.name}"' if active else ""
     summary = await get_group_summary(
         uow, group.id, group.simplify_debts, event_id=active.id if active else None
@@ -63,7 +66,9 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
 
         lines = [f'Balances for "{active.name}":' if active else "Group balances:"]
         for b in sorted(summary.balances, key=lambda x: -x.balance_cents):
-            lines.append(f"  {display_by_id[b.user_id]}: {_fmt(b.balance_cents, b.currency)}")
+            lines.append(
+                f"  {display_by_id[b.user_id]}: {_fmt(b.balance_cents, b.currency)}"
+            )
 
         if summary.suggested_transfers:
             heading = "simplified" if group.simplify_debts else "raw"
@@ -97,8 +102,12 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     if owed_to_me or i_owe:
         lines.append(f"\nTo settle up ({heading}):")
     for t in owed_to_me:
-        lines.append(f"  {display_by_id[t.from_user_id]} pays you {_amount(t.amount_cents, t.currency)}")
+        lines.append(
+            f"  {display_by_id[t.from_user_id]} pays you {_amount(t.amount_cents, t.currency)}"
+        )
     for t in i_owe:
-        lines.append(f"  you pay {display_by_id[t.to_user_id]} {_amount(t.amount_cents, t.currency)}")
+        lines.append(
+            f"  you pay {display_by_id[t.to_user_id]} {_amount(t.amount_cents, t.currency)}"
+        )
 
     await message.reply("\n".join(lines))

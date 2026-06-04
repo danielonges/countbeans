@@ -5,6 +5,7 @@ and group, ensure an active membership row, and claim a pending placeholder if
 one waits under the caller's @handle. Returns an OnboardResult carrying the two
 status flags the bot needs to compose a status-aware reply.
 """
+
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.dto.results import OnboardResult
 

@@ -5,6 +5,7 @@ Admin gating (creator/administrator) backs the group-wide settings commands
 check is a single getChatMember call — available to any bot — so it lives here
 rather than being copy-pasted per handler.
 """
+
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 

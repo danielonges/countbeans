@@ -1,4 +1,5 @@
 """Shared parsing helpers for the bot's command handlers."""
+
 import re
 
 # Opening → closing quote characters accepted around a description. Covers the
@@ -57,6 +58,7 @@ def extract_quoted_description(text: str) -> tuple[str | None, str]:
             # Opener had no matching closer — not a quote; keep scanning past it.
         i += 1
     return None, text
+
 
 # Currency *symbols* that map to exactly one ISO-4217 code in this app's context.
 # Deliberately omits `$`, which is ambiguous across USD/SGD/AUD/CAD/HKD/…: rather

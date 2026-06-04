@@ -1,4 +1,5 @@
 """Balance query service — derives net balances from the immutable ledger."""
+
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -86,8 +87,12 @@ def _greedy_transfers(balances: BalanceMap, *, by_amount: bool) -> list[Transfer
 
     transfers: list[Transfer] = []
     for cur, bal in by_currency.items():
-        debtors = ordered([_Party(uid, -cents) for uid, cents in bal.items() if cents < 0])
-        creditors = ordered([_Party(uid, cents) for uid, cents in bal.items() if cents > 0])
+        debtors = ordered(
+            [_Party(uid, -cents) for uid, cents in bal.items() if cents < 0]
+        )
+        creditors = ordered(
+            [_Party(uid, cents) for uid, cents in bal.items() if cents > 0]
+        )
         i = j = 0
         while i < len(debtors) and j < len(creditors):
             pay = min(debtors[i].remaining, creditors[j].remaining)
@@ -116,7 +121,9 @@ def _raw_pairwise_transfers(balances: BalanceMap) -> list[Transfer]:
     return _greedy_transfers(balances, by_amount=False)
 
 
-def suggested_transfers(balances: BalanceMap, *, simplify_debts: bool) -> list[Transfer]:
+def suggested_transfers(
+    balances: BalanceMap, *, simplify_debts: bool
+) -> list[Transfer]:
     """The same suggested-transfer set ``/balance all`` renders: the simplified
     (reduced) set when the toggle is on, the raw pairwise set otherwise."""
     suggest = _simplified_transfers if simplify_debts else _raw_pairwise_transfers

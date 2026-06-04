@@ -1,4 +1,5 @@
 """add_expense service function with split-computation helpers."""
+
 import uuid
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)

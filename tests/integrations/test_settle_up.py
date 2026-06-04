@@ -6,6 +6,7 @@ Each test function gets a fresh session that rolls back on teardown.
 The ``_SessionUoW`` wrapper re-uses the test's already-open session so that
 ``settle_up`` runs inside the same transaction and can see the seeded rows.
 """
+
 import uuid
 
 import pytest
@@ -14,7 +15,14 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.db.models import (
+    Expense,
+    ExpenseShare,
+    Group,
+    GroupMember,
+    Settlement,
+    User,
+)
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.services.repositories import BalanceRepository, SettlementRepository
 from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
@@ -145,7 +153,9 @@ async def test_settle_up_returns_correct_result(session: AsyncSession) -> None:
 
 async def test_settle_up_same_user_rejected(session: AsyncSession) -> None:
     group, (payer, _) = await _seed(session)
-    with pytest.raises(ValidationError, match="from_user_id and to_user_id must be different"):
+    with pytest.raises(
+        ValidationError, match="from_user_id and to_user_id must be different"
+    ):
         _cmd(group, payer, payer)
 
 
@@ -240,7 +250,10 @@ async def _expense_with_shares(
     session.add(expense)
     await session.flush()
     session.add_all(
-        [ExpenseShare(expense_id=expense.id, user_id=u.id, share_cents=c) for u, c in shares]
+        [
+            ExpenseShare(expense_id=expense.id, user_id=u.id, share_cents=c)
+            for u, c in shares
+        ]
     )
     await session.flush()
     return expense
@@ -291,7 +304,9 @@ async def test_settle_all_zeroes_the_group(session: AsyncSession) -> None:
     assert remaining == {}
 
 
-async def test_settle_all_on_settled_group_records_nothing(session: AsyncSession) -> None:
+async def test_settle_all_on_settled_group_records_nothing(
+    session: AsyncSession,
+) -> None:
     group, _ = await _seed(session, n_users=2)  # no expenses → nothing outstanding
     uow = _SessionUoW(session)
 

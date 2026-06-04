@@ -35,7 +35,9 @@ def upgrade() -> None:
             "LENGTH(default_currency) = 3", name=op.f("ck_groups_default_currency_len")
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_groups")),
-        sa.UniqueConstraint("telegram_chat_id", name=op.f("uq_groups_telegram_chat_id")),
+        sa.UniqueConstraint(
+            "telegram_chat_id", name=op.f("uq_groups_telegram_chat_id")
+        ),
     )
     op.create_table(
         "users",
@@ -61,8 +63,12 @@ def upgrade() -> None:
         sa.Column("voided_by", sa.UUID(), nullable=True),
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("LENGTH(currency) = 3", name=op.f("ck_expenses_currency_len")),
-        sa.CheckConstraint("amount_cents > 0", name=op.f("ck_expenses_amount_positive")),
+        sa.CheckConstraint(
+            "LENGTH(currency) = 3", name=op.f("ck_expenses_currency_len")
+        ),
+        sa.CheckConstraint(
+            "amount_cents > 0", name=op.f("ck_expenses_amount_positive")
+        ),
         sa.ForeignKeyConstraint(
             ["created_by"], ["users.id"], name=op.f("fk_expenses_created_by_users")
         ),
@@ -89,7 +95,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["user_id"], ["users.id"], name=op.f("fk_group_members_user_id_users")
         ),
-        sa.PrimaryKeyConstraint("group_id", "user_id", "joined_at", name=op.f("pk_group_members")),
+        sa.PrimaryKeyConstraint(
+            "group_id", "user_id", "joined_at", name=op.f("pk_group_members")
+        ),
     )
     op.create_table(
         "settlements",
@@ -100,13 +108,19 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(length=3), nullable=False),
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("LENGTH(currency) = 3", name=op.f("ck_settlements_currency_len")),
-        sa.CheckConstraint("amount_cents > 0", name=op.f("ck_settlements_amount_positive")),
+        sa.CheckConstraint(
+            "LENGTH(currency) = 3", name=op.f("ck_settlements_currency_len")
+        ),
+        sa.CheckConstraint(
+            "amount_cents > 0", name=op.f("ck_settlements_amount_positive")
+        ),
         sa.CheckConstraint(
             "from_user_id <> to_user_id", name=op.f("ck_settlements_different_users")
         ),
         sa.ForeignKeyConstraint(
-            ["from_user_id"], ["users.id"], name=op.f("fk_settlements_from_user_id_users")
+            ["from_user_id"],
+            ["users.id"],
+            name=op.f("fk_settlements_from_user_id_users"),
         ),
         sa.ForeignKeyConstraint(
             ["group_id"], ["groups.id"], name=op.f("fk_settlements_group_id_groups")
@@ -123,12 +137,16 @@ def upgrade() -> None:
         sa.Column("share_cents", sa.BigInteger(), nullable=False),
         sa.CheckConstraint("share_cents >= 0", name=op.f("ck_expense_shares_nonneg")),
         sa.ForeignKeyConstraint(
-            ["expense_id"], ["expenses.id"], name=op.f("fk_expense_shares_expense_id_expenses")
+            ["expense_id"],
+            ["expenses.id"],
+            name=op.f("fk_expense_shares_expense_id_expenses"),
         ),
         sa.ForeignKeyConstraint(
             ["user_id"], ["users.id"], name=op.f("fk_expense_shares_user_id_users")
         ),
-        sa.PrimaryKeyConstraint("expense_id", "user_id", name=op.f("pk_expense_shares")),
+        sa.PrimaryKeyConstraint(
+            "expense_id", "user_id", name=op.f("pk_expense_shares")
+        ),
     )
     # ### end Alembic commands ###
 

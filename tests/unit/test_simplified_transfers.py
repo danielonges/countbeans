@@ -4,6 +4,7 @@ No database needed. Covers the per-currency split, the reduced transfer count vs
 raw pairwise, deterministic tie-breaking, and the load-bearing invariant that the
 output is always a *valid* settlement (every balance zeroes out).
 """
+
 import uuid
 
 from countbeans.dto.domain import BalanceKey, BalanceMap, Transfer
@@ -29,7 +30,9 @@ def _settles(balances: BalanceMap, transfers: list[Transfer]) -> bool:
 
 def test_one_debtor_one_creditor() -> None:
     a, b = _uid(), _uid()
-    transfers = _simplified_transfers({BalanceKey(a, "SGD"): -100, BalanceKey(b, "SGD"): 100})
+    transfers = _simplified_transfers(
+        {BalanceKey(a, "SGD"): -100, BalanceKey(b, "SGD"): 100}
+    )
     assert len(transfers) == 1
     assert transfers[0].from_user_id == a
     assert transfers[0].to_user_id == b
@@ -42,15 +45,22 @@ def test_empty_balances_no_transfers() -> None:
 
 def test_all_creditors_no_transfers() -> None:
     a, b = _uid(), _uid()
-    assert _simplified_transfers({BalanceKey(a, "SGD"): 50, BalanceKey(b, "SGD"): 50}) == []
+    assert (
+        _simplified_transfers({BalanceKey(a, "SGD"): 50, BalanceKey(b, "SGD"): 50})
+        == []
+    )
 
 
 def test_currency_isolation() -> None:
     a, b = _uid(), _uid()
-    transfers = _simplified_transfers({
-        BalanceKey(a, "SGD"): -100, BalanceKey(b, "SGD"): 100,
-        BalanceKey(a, "USD"): -50, BalanceKey(b, "USD"): 50,
-    })
+    transfers = _simplified_transfers(
+        {
+            BalanceKey(a, "SGD"): -100,
+            BalanceKey(b, "SGD"): 100,
+            BalanceKey(a, "USD"): -50,
+            BalanceKey(b, "USD"): 50,
+        }
+    )
     assert sum(t.amount_cents for t in transfers if t.currency == "SGD") == 100
     assert sum(t.amount_cents for t in transfers if t.currency == "USD") == 50
     assert {t.currency for t in transfers} == {"SGD", "USD"}
@@ -63,8 +73,10 @@ def test_reduces_transfer_count_vs_raw_pairwise() -> None:
     # two big sides first and settles in 2.
     a, b, c, d = sorted(_uid() for _ in range(4))  # a < b < c < d
     balances = {
-        BalanceKey(a, "SGD"): -1, BalanceKey(b, "SGD"): -9,
-        BalanceKey(c, "SGD"): 9, BalanceKey(d, "SGD"): 1,
+        BalanceKey(a, "SGD"): -1,
+        BalanceKey(b, "SGD"): -9,
+        BalanceKey(c, "SGD"): 9,
+        BalanceKey(d, "SGD"): 1,
     }
 
     simplified = _simplified_transfers(balances)
@@ -88,7 +100,9 @@ def test_deterministic_tie_break_by_id() -> None:
     # is stable across runs.
     a, b, c = _uid(), _uid(), _uid()
     balances = {
-        BalanceKey(a, "SGD"): -5, BalanceKey(b, "SGD"): -5, BalanceKey(c, "SGD"): 10,
+        BalanceKey(a, "SGD"): -5,
+        BalanceKey(b, "SGD"): -5,
+        BalanceKey(c, "SGD"): 10,
     }
 
     first = _simplified_transfers(balances)
@@ -102,8 +116,11 @@ def test_always_a_valid_settlement() -> None:
     # A messier mix of debtors and creditors still settles exactly.
     a, b, c, d, e = _uid(), _uid(), _uid(), _uid(), _uid()
     balances = {
-        BalanceKey(a, "SGD"): -30, BalanceKey(b, "SGD"): -45, BalanceKey(c, "SGD"): -25,
-        BalanceKey(d, "SGD"): 70, BalanceKey(e, "SGD"): 30,
+        BalanceKey(a, "SGD"): -30,
+        BalanceKey(b, "SGD"): -45,
+        BalanceKey(c, "SGD"): -25,
+        BalanceKey(d, "SGD"): 70,
+        BalanceKey(e, "SGD"): 30,
     }
     transfers = _simplified_transfers(balances)
     assert _settles(balances, transfers)

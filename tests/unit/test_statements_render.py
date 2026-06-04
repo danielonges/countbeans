@@ -1,4 +1,5 @@
 """Unit tests for /statements rendering and pagination-keyboard logic."""
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -79,7 +80,9 @@ def test_render_empty_page():
 
 def test_render_header_has_page_and_total():
     # 9 entries, page size 8 → 2 pages; viewing page 0.
-    text = _render(_page([_expense()], page=0, page_size=8, total=9), "📋 Group statement")
+    text = _render(
+        _page([_expense()], page=0, page_size=8, total=9), "📋 Group statement"
+    )
     assert "page 1/2" in text
     assert "9 total" in text
 
@@ -110,4 +113,6 @@ def test_keyboard_middle_page_has_both():
 
 
 def test_keyboard_single_page_is_none():
-    assert _keyboard(_page([_expense()], page=0, page_size=8, total=3), "stmt:g") is None
+    assert (
+        _keyboard(_page([_expense()], page=0, page_size=8, total=3), "stmt:g") is None
+    )

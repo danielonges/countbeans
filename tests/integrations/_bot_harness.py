@@ -19,6 +19,7 @@ run) with:
 It needs Postgres like the other integration tests (handlers onboard, which
 writes), so it lives under tests/integrations/.
 """
+
 from datetime import datetime, timezone
 
 from aiogram import Bot, Dispatcher, Router
@@ -72,7 +73,12 @@ class MockedBot(Bot):
 
     async def __call__(self, method: TelegramMethod, request_timeout: int | None = None):  # type: ignore[override]
         if isinstance(method, GetMe):
-            return User(id=_BOT_ID, is_bot=True, first_name="countbeans", username="countbeans_bot")
+            return User(
+                id=_BOT_ID,
+                is_bot=True,
+                first_name="countbeans",
+                username="countbeans_bot",
+            )
         if isinstance(method, GetChatMember):
             user = User(id=method.user_id, is_bot=False, first_name="Caller")
             if self.caller_is_admin:
@@ -91,7 +97,9 @@ class MockedBot(Bot):
             return True
         if isinstance(method, EditMessageReplyMarkup):
             return True
-        raise NotImplementedError(f"MockedBot got an un-stubbed call: {type(method).__name__}")
+        raise NotImplementedError(
+            f"MockedBot got an un-stubbed call: {type(method).__name__}"
+        )
 
     @property
     def last_reply(self) -> str | None:
@@ -113,7 +121,10 @@ def _fake_sent_message(method: SendMessage) -> Message:
     return Message(
         message_id=999,
         date=datetime.now(timezone.utc),
-        chat=Chat(id=method.chat_id if isinstance(method.chat_id, int) else 0, type="supergroup"),
+        chat=Chat(
+            id=method.chat_id if isinstance(method.chat_id, int) else 0,
+            type="supergroup",
+        ),
         text=method.text,
     )
 
@@ -151,7 +162,9 @@ def make_message(
         message_id=1,
         date=datetime.now(timezone.utc),
         chat=Chat(id=chat_id, type=chat_type, title="Test Group"),
-        from_user=User(id=from_id, is_bot=False, first_name=first_name, username=username),
+        from_user=User(
+            id=from_id, is_bot=False, first_name=first_name, username=username
+        ),
         text=text,
     )
 
@@ -175,7 +188,9 @@ def make_callback(
     )
     return CallbackQuery(
         id="cb-1",
-        from_user=User(id=from_id, is_bot=False, first_name="Caller", username=username),
+        from_user=User(
+            id=from_id, is_bot=False, first_name="Caller", username=username
+        ),
         chat_instance="ci-1",
         message=inline_msg,
         data=data,

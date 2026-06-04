@@ -1,4 +1,5 @@
 """Bot handler for /group — group info snapshot."""
+
 import logging
 
 from aiogram import Bot, Router

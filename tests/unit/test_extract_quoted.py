@@ -1,4 +1,5 @@
 """Unit tests for extract_quoted_description — flexible quoted descriptions."""
+
 from countbeans.bot.parsing import extract_quoted_description
 
 
@@ -66,7 +67,7 @@ def test_empty_quotes_yield_none() -> None:
 
 def test_unmatched_apostrophe_skipped_so_real_quote_wins() -> None:
     # The ' in "it's" has no closing ' — it must not swallow the real "dinner".
-    desc, rest = extract_quoted_description("it's \"dinner\"")
+    desc, rest = extract_quoted_description('it\'s "dinner"')
     assert desc == "dinner"
     assert "it's" in rest
 

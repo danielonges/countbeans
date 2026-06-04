@@ -1,4 +1,5 @@
 """Service for /group — assembles a read-only snapshot of a group."""
+
 import uuid
 
 from countbeans.dto.domain import GroupInfo

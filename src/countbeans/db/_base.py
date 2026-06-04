@@ -27,7 +27,9 @@ UUIDpk = Annotated[
     # lambda wrapper: uuid_utils.uuid7 has optional kwargs so SQLAlchemy would
     # treat it as a context-sensitive default and pass the execution context as
     # the first positional arg. A zero-arg lambda avoids that.
-    mapped_column(UUID(as_uuid=True), primary_key=True, default=lambda: uuid_utils.uuid7()),
+    mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=lambda: uuid_utils.uuid7()
+    ),
 ]
 
 

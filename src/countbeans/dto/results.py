@@ -1,4 +1,5 @@
 """Outbound result DTOs — returned from the service core after a mutating operation."""
+
 import uuid
 
 from pydantic import BaseModel, ConfigDict

@@ -1,4 +1,5 @@
 """Repository classes — the only objects that hold SQLAlchemy models."""
+
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ class RawStatementEntry:
     amount_cents: int
     currency: str
     description: str | None
-    actor_id: uuid.UUID            # expense payer / settlement sender
+    actor_id: uuid.UUID  # expense payer / settlement sender
     counterparty_id: uuid.UUID | None  # settlement recipient; None for expense
     participant_count: int | None
     voided: bool
@@ -74,10 +75,12 @@ class ExpenseRepository:
     async def add(self, expense: Expense, shares: dict[uuid.UUID, int]) -> None:
         self._session.add(expense)
         await self._session.flush()
-        self._session.add_all([
-            ExpenseShare(expense_id=expense.id, user_id=uid, share_cents=cents)
-            for uid, cents in shares.items()
-        ])
+        self._session.add_all(
+            [
+                ExpenseShare(expense_id=expense.id, user_id=uid, share_cents=cents)
+                for uid, cents in shares.items()
+            ]
+        )
         await self._session.flush()
 
     async def activity_summary(self, group_id: uuid.UUID) -> list[ActivitySummary]:
@@ -88,7 +91,9 @@ class ExpenseRepository:
             .group_by(Expense.currency)
         )
         return [
-            ActivitySummary(currency=cur, expense_count=int(count), total_cents=int(total))
+            ActivitySummary(
+                currency=cur, expense_count=int(count), total_cents=int(total)
+            )
             for cur, count, total in rows
         ]
 
@@ -111,11 +116,13 @@ class BalanceRepository:
         the sum-to-zero invariant holds per ``(scope, currency)`` (CLAUDE.md
         "Events")."""
         exp_scope = (
-            Expense.event_id == event_id if event_id is not None
+            Expense.event_id == event_id
+            if event_id is not None
             else Expense.event_id.is_(None)
         )
         set_scope = (
-            Settlement.event_id == event_id if event_id is not None
+            Settlement.event_id == event_id
+            if event_id is not None
             else Settlement.event_id.is_(None)
         )
         result: BalanceMap = defaultdict(int)
@@ -131,7 +138,11 @@ class BalanceRepository:
 
         # 2. Share sums — money consumed
         rows = await self._session.execute(
-            select(ExpenseShare.user_id, Expense.currency, func.sum(ExpenseShare.share_cents))
+            select(
+                ExpenseShare.user_id,
+                Expense.currency,
+                func.sum(ExpenseShare.share_cents),
+            )
             .join(Expense, Expense.id == ExpenseShare.expense_id)
             .where(Expense.group_id == group_id, Expense.voided_at.is_(None), exp_scope)
             .group_by(ExpenseShare.user_id, Expense.currency)
@@ -141,7 +152,11 @@ class BalanceRepository:
 
         # 3. Settlements sent — debtor reduces their balance
         rows = await self._session.execute(
-            select(Settlement.from_user_id, Settlement.currency, func.sum(Settlement.amount_cents))
+            select(
+                Settlement.from_user_id,
+                Settlement.currency,
+                func.sum(Settlement.amount_cents),
+            )
             .where(Settlement.group_id == group_id, set_scope)
             .group_by(Settlement.from_user_id, Settlement.currency)
         )
@@ -150,7 +165,11 @@ class BalanceRepository:
 
         # 4. Settlements received — creditor balance is reduced
         rows = await self._session.execute(
-            select(Settlement.to_user_id, Settlement.currency, func.sum(Settlement.amount_cents))
+            select(
+                Settlement.to_user_id,
+                Settlement.currency,
+                func.sum(Settlement.amount_cents),
+            )
             .where(Settlement.group_id == group_id, set_scope)
             .group_by(Settlement.to_user_id, Settlement.currency)
         )
@@ -159,7 +178,9 @@ class BalanceRepository:
 
         return {k: v for k, v in result.items() if v != 0}
 
-    async def get_usernames(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    async def get_usernames(
+        self, user_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
         if not user_ids:
             return {}
         rows = await self._session.execute(
@@ -200,8 +221,12 @@ class StatementRepository:
         balance derivation which excludes them."""
         exp_q = select(Expense).where(Expense.group_id == group_id)
         if user_id is not None:
-            shared = select(ExpenseShare.expense_id).where(ExpenseShare.user_id == user_id)
-            exp_q = exp_q.where(or_(Expense.payer_id == user_id, Expense.id.in_(shared)))
+            shared = select(ExpenseShare.expense_id).where(
+                ExpenseShare.user_id == user_id
+            )
+            exp_q = exp_q.where(
+                or_(Expense.payer_id == user_id, Expense.id.in_(shared))
+            )
         expenses = (await self._session.execute(exp_q)).scalars().all()
 
         # Participant counts in one grouped pass over the relevant expenses.
@@ -232,7 +257,9 @@ class StatementRepository:
         set_q = select(Settlement).where(Settlement.group_id == group_id)
         if user_id is not None:
             set_q = set_q.where(
-                or_(Settlement.from_user_id == user_id, Settlement.to_user_id == user_id)
+                or_(
+                    Settlement.from_user_id == user_id, Settlement.to_user_id == user_id
+                )
             )
         settlements = (await self._session.execute(set_q)).scalars().all()
         entries.extend(
@@ -397,9 +424,7 @@ class GroupRepository:
         """Point the active-event pointer at an open event (resume / new) or NULL
         (pause / close). Durable, shared group state — not aiogram FSM."""
         await self._session.execute(
-            update(Group)
-            .where(Group.id == group_id)
-            .values(active_event_id=event_id)
+            update(Group).where(Group.id == group_id).values(active_event_id=event_id)
         )
 
 

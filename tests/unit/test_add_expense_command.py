@@ -1,4 +1,5 @@
 """Unit tests for AddExpenseCommand DTO validation — no database needed."""
+
 import uuid
 
 import pytest

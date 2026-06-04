@@ -10,6 +10,7 @@ ledger rows keep whatever currency they were recorded with (the ledger is
 append-only and balances derive per-currency, so a group can hold mixed
 currencies).
 """
+
 import logging
 
 from aiogram import Bot, Router

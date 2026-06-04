@@ -1,4 +1,5 @@
 """Handler tests for /currency — read by anyone, change is admin-gated."""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._bot_harness import MockedBot, feed, make_message
@@ -11,7 +12,9 @@ async def test_currency_reports_default(dispatcher, session: AsyncSession) -> No
     assert "SGD" in (bot.last_reply or "")
 
 
-async def test_currency_change_refused_for_non_admin(dispatcher, session: AsyncSession) -> None:
+async def test_currency_change_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
     bot = MockedBot(caller_is_admin=False)
     await feed(dispatcher, bot, make_message("/currency EUR"), session=session)
 

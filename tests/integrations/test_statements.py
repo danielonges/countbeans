@@ -6,12 +6,20 @@ expense/settlement merge, page windowing + clamping, and the per-entry fields
 (usernames, participant count, voided flag). Each test rolls back via the
 session fixture.
 """
+
 from datetime import datetime, timedelta, timezone
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.db.models import (
+    Expense,
+    ExpenseShare,
+    Group,
+    GroupMember,
+    Settlement,
+    User,
+)
 from countbeans.services.repositories import (
     BalanceRepository,
     GroupRepository,
@@ -36,7 +44,9 @@ def _at(minutes: int) -> datetime:
     return _T0 + timedelta(minutes=minutes)
 
 
-async def _seed(session: AsyncSession, usernames: list[str]) -> tuple[Group, list[User]]:
+async def _seed(
+    session: AsyncSession, usernames: list[str]
+) -> tuple[Group, list[User]]:
     group = Group(id=uuid_utils.uuid7(), telegram_chat_id=1, default_currency="SGD")
     users = [
         User(id=uuid_utils.uuid7(), telegram_user_id=1000 + i, username=name)
@@ -75,7 +85,10 @@ async def _add_expense(
     session.add(exp)
     await session.flush()
     session.add_all(
-        [ExpenseShare(expense_id=exp.id, user_id=u.id, share_cents=c) for u, c in shares]
+        [
+            ExpenseShare(expense_id=exp.id, user_id=u.id, share_cents=c)
+            for u, c in shares
+        ]
     )
     await session.flush()
     return exp
@@ -115,8 +128,13 @@ async def test_empty_ledger(session: AsyncSession) -> None:
 async def test_group_scope_newest_first_with_fields(session: AsyncSession) -> None:
     group, (alice, bob) = await _seed(session, ["alice", "bob"])
     await _add_expense(
-        session, group, alice, 100, [(alice, 50), (bob, 50)],
-        created_at=_at(1), description="Dinner",
+        session,
+        group,
+        alice,
+        100,
+        [(alice, 50), (bob, 50)],
+        created_at=_at(1),
+        description="Dinner",
     )
     await _add_settlement(session, group, bob, alice, 50, created_at=_at(2))
 
@@ -143,8 +161,13 @@ async def test_pagination_windows_and_clamps(session: AsyncSession) -> None:
     group, (alice, bob) = await _seed(session, ["alice", "bob"])
     for i in range(1, 6):  # five expenses at t=1..5
         await _add_expense(
-            session, group, alice, 10 * i, [(alice, 10 * i)],
-            created_at=_at(i), description=f"e{i}",
+            session,
+            group,
+            alice,
+            10 * i,
+            [(alice, 10 * i)],
+            created_at=_at(i),
+            description=f"e{i}",
         )
 
     uow = _SessionUoW(session)
@@ -169,13 +192,23 @@ async def test_user_scope_only_includes_involvement(session: AsyncSession) -> No
     group, (alice, bob, carol) = await _seed(session, ["alice", "bob", "carol"])
     # e1: alice pays, alice+bob share (carol uninvolved)
     await _add_expense(
-        session, group, alice, 100, [(alice, 50), (bob, 50)],
-        created_at=_at(1), description="e1",
+        session,
+        group,
+        alice,
+        100,
+        [(alice, 50), (bob, 50)],
+        created_at=_at(1),
+        description="e1",
     )
     # e2: carol pays, carol-only share (alice + bob uninvolved)
     await _add_expense(
-        session, group, carol, 30, [(carol, 30)],
-        created_at=_at(2), description="e2",
+        session,
+        group,
+        carol,
+        30,
+        [(carol, 30)],
+        created_at=_at(2),
+        description="e2",
     )
     # s: bob pays carol (alice uninvolved)
     await _add_settlement(session, group, bob, carol, 20, created_at=_at(3))
@@ -200,8 +233,14 @@ async def test_user_scope_only_includes_involvement(session: AsyncSession) -> No
 async def test_voided_expense_included_and_flagged(session: AsyncSession) -> None:
     group, (alice, bob) = await _seed(session, ["alice", "bob"])
     await _add_expense(
-        session, group, alice, 100, [(alice, 50), (bob, 50)],
-        created_at=_at(1), description="oops", voided=True,
+        session,
+        group,
+        alice,
+        100,
+        [(alice, 50), (bob, 50)],
+        created_at=_at(1),
+        description="oops",
+        voided=True,
     )
 
     uow = _SessionUoW(session)

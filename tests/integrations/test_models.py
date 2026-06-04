@@ -41,6 +41,7 @@ def _settlement(group: Group, from_user: User, to_user: User, **kwargs) -> Settl
 
 # --- User ---
 
+
 async def test_user_nullable_fields_persist(session: AsyncSession) -> None:
     user = _user()
     session.add(user)
@@ -81,19 +82,24 @@ async def test_user_pending_placeholder_username_unique(session: AsyncSession) -
         await session.flush()
 
 
-async def test_user_claimed_and_placeholder_may_share_username(session: AsyncSession) -> None:
+async def test_user_claimed_and_placeholder_may_share_username(
+    session: AsyncSession,
+) -> None:
     # The index is partial, so it constrains only placeholders: a claimed user
     # and a placeholder (or two claimed users) may share a username across a
     # rename/reuse without violating it.
-    session.add_all([
-        _user(username="carol", telegram_user_id=1),
-        _user(username="carol"),  # pending placeholder, same handle
-        _user(username="carol", telegram_user_id=2),
-    ])
+    session.add_all(
+        [
+            _user(username="carol", telegram_user_id=1),
+            _user(username="carol"),  # pending placeholder, same handle
+            _user(username="carol", telegram_user_id=2),
+        ]
+    )
     await session.flush()  # must not raise
 
 
 # --- Group ---
+
 
 async def test_group_simplify_debts_defaults_true(session: AsyncSession) -> None:
     group = _group()
@@ -123,6 +129,7 @@ async def test_group_telegram_chat_id_unique(session: AsyncSession) -> None:
 
 
 # --- Expense ---
+
 
 async def test_expense_rejects_zero_amount(session: AsyncSession) -> None:
     group, user = _group(), _user()
@@ -163,6 +170,7 @@ async def test_expense_currency_check_rejects_long(session: AsyncSession) -> Non
 
 # --- ExpenseShare ---
 
+
 async def test_expense_share_rejects_negative(session: AsyncSession) -> None:
     group, user = _group(), _user()
     session.add_all([group, user])
@@ -190,6 +198,7 @@ async def test_expense_share_accepts_zero(session: AsyncSession) -> None:
 
 
 # --- Settlement ---
+
 
 async def test_settlement_rejects_self(session: AsyncSession) -> None:
     group, user = _group(), _user()

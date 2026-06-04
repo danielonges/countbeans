@@ -5,6 +5,7 @@ admin-only — the bot checks the caller via getChatMember and proceeds only if
 their status is `creator` or `administrator`. The setting is purely
 presentational (see CLAUDE.md "Debt simplification").
 """
+
 import logging
 
 from aiogram import Bot, Router

@@ -8,6 +8,7 @@ non-admin is refused and pointed at /join, which is how everyone else opts in.
 In a private chat there is nothing to track, so it just explains that the bot is
 group-only.
 """
+
 import logging
 
 from aiogram import Bot, F, Router

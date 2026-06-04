@@ -4,6 +4,7 @@ Reads the merged expense+settlement stream (group-wide, or scoped to one user),
 resolves usernames for just the requested page, and returns a StatementPage. A
 pure read: it writes nothing and derives nothing about balances.
 """
+
 import uuid
 
 from countbeans.dto.domain import StatementEntry, StatementPage

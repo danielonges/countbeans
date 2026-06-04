@@ -1,4 +1,5 @@
 """Handler tests for /simplify — read by anyone, toggle is admin-gated."""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._bot_harness import MockedBot, feed, make_message
@@ -11,7 +12,9 @@ async def test_simplify_reports_default_on(dispatcher, session: AsyncSession) ->
     assert "ON" in (bot.last_reply or "")
 
 
-async def test_simplify_toggle_refused_for_non_admin(dispatcher, session: AsyncSession) -> None:
+async def test_simplify_toggle_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
     bot = MockedBot(caller_is_admin=False)
     await feed(dispatcher, bot, make_message("/simplify off"), session=session)
 

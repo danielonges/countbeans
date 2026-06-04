@@ -4,6 +4,7 @@
 branch selection is tested here without a bot or DB. Claiming takes precedence
 over newly-added (it's the more informative outcome).
 """
+
 import uuid
 
 from countbeans.bot.handlers.join import _compose_join_reply

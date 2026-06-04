@@ -1,4 +1,5 @@
 """settle_up service function — records a settlement payment in the ledger."""
+
 import uuid
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
@@ -29,7 +30,9 @@ async def owed_by_currency(
     hint. An empty dict means the current suggested settlement routes no payment
     between this pair."""
     balances = await uow.balances.compute_for_group(group_id, event_id=event_id)
-    return suggested_owed_by_currency(balances, from_id, to_id, simplify_debts=simplify_debts)
+    return suggested_owed_by_currency(
+        balances, from_id, to_id, simplify_debts=simplify_debts
+    )
 
 
 async def settle_up(
@@ -45,7 +48,11 @@ async def settle_up(
     # both cases yield owed == 0.
     balances = await uow.balances.compute_for_group(cmd.group_id, event_id=cmd.event_id)
     owed = suggested_owed(
-        balances, cmd.from_user_id, cmd.to_user_id, cmd.currency, simplify_debts=simplify_debts
+        balances,
+        cmd.from_user_id,
+        cmd.to_user_id,
+        cmd.currency,
+        simplify_debts=simplify_debts,
     )
     if owed <= 0:
         raise ValueError(

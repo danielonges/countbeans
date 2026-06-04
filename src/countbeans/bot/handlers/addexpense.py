@@ -7,6 +7,7 @@ Participant rules (see CLAUDE.md "Splitting an expense"):
   * one or more @mentions   → split among only those named (you are NOT
     included unless you @mention yourself).
 """
+
 import logging
 import re
 
@@ -72,7 +73,9 @@ async def cmd_addexpense(
 
     # Active-event mode: when the group has an active event, auto-tag this expense
     # to it and split the event roster (not the whole group) — CLAUDE.md "Events".
-    active = await uow.events.get(group.active_event_id) if group.active_event_id else None
+    active = (
+        await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
     event_id = active.id if active else None
 
     # The amount token may carry a currency marker ($50, €50, USD50); resolve it
@@ -140,14 +143,18 @@ async def cmd_addexpense(
         "Shares:",
     ]
     for p in participants:
-        lines.append(f"  {display_name(p.username, p.first_name)}: {_money(result.shares.get(p.user_id, 0), result.currency)}")
+        lines.append(
+            f"  {display_name(p.username, p.first_name)}: {_money(result.shares.get(p.user_id, 0), result.currency)}"
+        )
 
     # When splitting the whole group, warn if the bot can't see everyone — it can
     # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside
     # an event, @all means the roster (an intentional subset), so this gate is skipped.
     if active is None and (not mentions or all(h.lower() == "all" for h in mentions)):
         try:
-            actual = await bot.get_chat_member_count(message.chat.id) - 1  # minus the bot
+            actual = (
+                await bot.get_chat_member_count(message.chat.id) - 1
+            )  # minus the bot
             if len(participants) < actual:
                 gap = actual - len(participants)
                 lines.append(

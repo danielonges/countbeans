@@ -3,6 +3,7 @@
 Uses an ephemeral Postgres container (Testcontainers via conftest.py).
 Each test rolls back via the session fixture — no permanent state.
 """
+
 import uuid
 
 import pytest
@@ -35,7 +36,9 @@ def _make_user(**kw: object) -> User:
 
 
 def _make_group(telegram_chat_id: int = 1) -> Group:
-    return Group(id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="SGD")
+    return Group(
+        id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="SGD"
+    )
 
 
 async def _seed(session: AsyncSession, n: int = 2) -> tuple[Group, list[User]]:
@@ -71,8 +74,18 @@ async def test_add_expense_records_rows(session: AsyncSession) -> None:
 
     result = await add_expense(uow, _cmd(group, alice, [alice, bob]))  # type: ignore[arg-type]
 
-    expense = (await session.execute(select(Expense).where(Expense.id == result.expense_id))).scalar_one()
-    shares = (await session.execute(select(ExpenseShare).where(ExpenseShare.expense_id == result.expense_id))).scalars().all()
+    expense = (
+        await session.execute(select(Expense).where(Expense.id == result.expense_id))
+    ).scalar_one()
+    shares = (
+        (
+            await session.execute(
+                select(ExpenseShare).where(ExpenseShare.expense_id == result.expense_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     assert expense.amount_cents == 1000
     assert expense.payer_id == alice.id
@@ -141,7 +154,9 @@ async def _seed_named(
     return group, users
 
 
-async def test_resolve_participants_no_mentions_splits_everyone(session: AsyncSession) -> None:
+async def test_resolve_participants_no_mentions_splits_everyone(
+    session: AsyncSession,
+) -> None:
     group, (alice, bob) = await _seed(session)
     uow = _SessionUoW(session)
 
@@ -149,7 +164,9 @@ async def test_resolve_participants_no_mentions_splits_everyone(session: AsyncSe
     assert {p.user_id for p in parts} == {alice.id, bob.id}
 
 
-async def test_resolve_participants_all_keyword_splits_everyone(session: AsyncSession) -> None:
+async def test_resolve_participants_all_keyword_splits_everyone(
+    session: AsyncSession,
+) -> None:
     group, (alice, bob) = await _seed(session)
     uow = _SessionUoW(session)
 
@@ -166,7 +183,9 @@ async def test_resolve_participants_named_excludes_payer(session: AsyncSession) 
     assert [p.user_id for p in parts] == [bob.id]
 
 
-async def test_resolve_participants_self_mention_includes_payer(session: AsyncSession) -> None:
+async def test_resolve_participants_self_mention_includes_payer(
+    session: AsyncSession,
+) -> None:
     group, (alice, bob) = await _seed_named(session, ["alice", "bob"])
     uow = _SessionUoW(session)
 
@@ -175,7 +194,9 @@ async def test_resolve_participants_self_mention_includes_payer(session: AsyncSe
     assert {p.user_id for p in parts} == {alice.id, bob.id}
 
 
-async def test_resolve_participants_unknown_handle_becomes_placeholder(session: AsyncSession) -> None:
+async def test_resolve_participants_unknown_handle_becomes_placeholder(
+    session: AsyncSession,
+) -> None:
     group, (alice,) = await _seed_named(session, ["alice"])
     uow = _SessionUoW(session)
 

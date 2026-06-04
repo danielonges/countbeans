@@ -3,16 +3,28 @@
 Uses an ephemeral Postgres container (Testcontainers via conftest.py).
 Each test rolls back via the session fixture.
 """
+
 import uuid
 from datetime import datetime, timezone
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense, ExpenseShare, Group, GroupMember, Settlement, User
+from countbeans.db.models import (
+    Expense,
+    ExpenseShare,
+    Group,
+    GroupMember,
+    Settlement,
+    User,
+)
 from countbeans.dto.domain import BalanceKey, BalanceMap, Transfer
 from countbeans.services.balance import compute_balances, get_group_summary
-from countbeans.services.repositories import BalanceRepository, GroupRepository, UserRepository
+from countbeans.services.repositories import (
+    BalanceRepository,
+    GroupRepository,
+    UserRepository,
+)
 
 
 class _SessionUoW:
@@ -38,7 +50,9 @@ def _user(**kw: object) -> User:
 
 
 def _group(chat_id: int = 1) -> Group:
-    return Group(id=uuid_utils.uuid7(), telegram_chat_id=chat_id, default_currency="SGD")
+    return Group(
+        id=uuid_utils.uuid7(), telegram_chat_id=chat_id, default_currency="SGD"
+    )
 
 
 async def _seed(session: AsyncSession, n: int = 2) -> tuple[Group, list[User]]:
@@ -67,7 +81,9 @@ def _share(expense: Expense, user: User, cents: int) -> ExpenseShare:
     return ExpenseShare(expense_id=expense.id, user_id=user.id, share_cents=cents)
 
 
-def _settlement(group: Group, frm: User, to: User, amount: int, currency: str = "SGD") -> Settlement:
+def _settlement(
+    group: Group, frm: User, to: User, amount: int, currency: str = "SGD"
+) -> Settlement:
     return Settlement(
         id=uuid_utils.uuid7(),
         group_id=group.id,
@@ -96,7 +112,7 @@ async def test_single_expense_balances(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
     raw = await compute_balances(uow, group.id)  # type: ignore[arg-type]
 
-    assert raw[BalanceKey(alice.id, "SGD")] == 50   # +100 fronted − 50 share
+    assert raw[BalanceKey(alice.id, "SGD")] == 50  # +100 fronted − 50 share
     assert raw[BalanceKey(bob.id, "SGD")] == -50
     assert sum(raw.values()) == 0
 
@@ -121,7 +137,9 @@ async def test_sum_to_zero_three_users(session: AsyncSession) -> None:
     exp = _expense(group, alice, 90)
     session.add(exp)
     await session.flush()
-    session.add_all([_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)])
+    session.add_all(
+        [_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)]
+    )
     await session.flush()
 
     uow = _SessionUoW(session)
@@ -134,7 +152,9 @@ async def test_get_group_summary(session: AsyncSession) -> None:
     exp = _expense(group, alice, 90)
     session.add(exp)
     await session.flush()
-    session.add_all([_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)])
+    session.add_all(
+        [_share(exp, alice, 30), _share(exp, bob, 30), _share(exp, carol, 30)]
+    )
     await session.flush()
 
     uow = _SessionUoW(session)
@@ -184,7 +204,9 @@ async def test_group_summary_honors_simplify_toggle(session: AsyncSession) -> No
     assert set(on.balances) == set(off.balances)
 
     # The simplified view is the reduced, deterministic transfer set.
-    assert {(t.from_user_id, t.to_user_id, t.amount_cents) for t in on.suggested_transfers} == {
+    assert {
+        (t.from_user_id, t.to_user_id, t.amount_cents) for t in on.suggested_transfers
+    } == {
         (b.id, c.id, 9),
         (a.id, d.id, 1),
     }
@@ -269,6 +291,8 @@ async def test_partial_settlement_then_simplify_flip_preserves_balances(
     assert _settles(after, on.suggested_transfers)
     assert _settles(after, off.suggested_transfers)
     assert len(on.suggested_transfers) <= len(off.suggested_transfers)
-    assert {(t.from_user_id, t.to_user_id, t.amount_cents) for t in on.suggested_transfers} != {
+    assert {
+        (t.from_user_id, t.to_user_id, t.amount_cents) for t in on.suggested_transfers
+    } != {
         (t.from_user_id, t.to_user_id, t.amount_cents) for t in off.suggested_transfers
     }

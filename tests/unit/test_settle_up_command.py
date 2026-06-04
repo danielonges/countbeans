@@ -1,4 +1,5 @@
 """Unit tests for SettleUpCommand DTO validation — no database needed."""
+
 import uuid
 
 import pytest
@@ -45,7 +46,9 @@ def test_settleup_command_rejects_negative_amount() -> None:
 
 def test_settleup_command_rejects_same_user() -> None:
     same_id = uuid.uuid4()
-    with pytest.raises(ValidationError, match="from_user_id and to_user_id must be different"):
+    with pytest.raises(
+        ValidationError, match="from_user_id and to_user_id must be different"
+    ):
         _valid_cmd(from_user_id=same_id, to_user_id=same_id)
 
 

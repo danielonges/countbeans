@@ -1,4 +1,5 @@
 """Unit tests for apportion() and compute_shares() — no database needed."""
+
 import uuid
 
 import pytest

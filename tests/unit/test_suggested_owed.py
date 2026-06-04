@@ -5,6 +5,7 @@ amount of the suggested you→them transfer. No DB: balances are constructed
 directly. UUIDs are int-derived so the greedy tie-break (by id) is deterministic
 and the simplify-on-vs-off routing is pinned exactly.
 """
+
 import uuid
 
 from countbeans.dto.domain import BalanceKey, BalanceMap
@@ -47,12 +48,20 @@ def test_cap_is_below_net_debt() -> None:
 
 def test_by_currency_isolates_currencies() -> None:
     # A owes B in SGD and C in EUR; each scope sums to zero independently.
-    balances = _bal({
-        (A, "SGD"): -30_00, (B, "SGD"): +30_00,
-        (A, "EUR"): -20_00, (C, "EUR"): +20_00,
-    })
-    assert suggested_owed_by_currency(balances, A, B, simplify_debts=True) == {"SGD": 30_00}
-    assert suggested_owed_by_currency(balances, A, C, simplify_debts=True) == {"EUR": 20_00}
+    balances = _bal(
+        {
+            (A, "SGD"): -30_00,
+            (B, "SGD"): +30_00,
+            (A, "EUR"): -20_00,
+            (C, "EUR"): +20_00,
+        }
+    )
+    assert suggested_owed_by_currency(balances, A, B, simplify_debts=True) == {
+        "SGD": 30_00
+    }
+    assert suggested_owed_by_currency(balances, A, C, simplify_debts=True) == {
+        "EUR": 20_00
+    }
     # Looking up the wrong currency for the pair yields zero.
     assert suggested_owed(balances, A, B, "EUR", simplify_debts=True) == 0
 
@@ -61,9 +70,14 @@ def test_simplify_flag_changes_routing() -> None:
     # Net: A -1, B -9, C +9, D +1. Simplified pairs largest-largest (B→C 9,
     # A→D 1); raw pairs in id order (A→C 1, B→C 8, B→D 1). So whether A is
     # suggested to pay C flips with the toggle — proving the flag is threaded.
-    balances = _bal({
-        (A, "SGD"): -1_00, (B, "SGD"): -9_00, (C, "SGD"): +9_00, (D, "SGD"): +1_00,
-    })
+    balances = _bal(
+        {
+            (A, "SGD"): -1_00,
+            (B, "SGD"): -9_00,
+            (C, "SGD"): +9_00,
+            (D, "SGD"): +1_00,
+        }
+    )
     assert suggested_owed(balances, A, C, "SGD", simplify_debts=True) == 0
     assert suggested_owed(balances, A, D, "SGD", simplify_debts=True) == 1_00
 

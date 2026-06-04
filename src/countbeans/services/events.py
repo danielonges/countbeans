@@ -6,6 +6,7 @@ and the group's active-event pointer, but never net scopes or materialize a
 balance. All SQL lives in the repositories; one transaction per command via the
 caller-managed UoW.
 """
+
 import uuid
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID

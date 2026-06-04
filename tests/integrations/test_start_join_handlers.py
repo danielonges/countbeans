@@ -5,6 +5,7 @@ MockedBot, covering the paths the service-core tests can't: the /start admin
 gate, chat-type routing, and which reply text is sent. Needs Postgres (handlers
 onboard) — see conftest.py.
 """
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +40,9 @@ async def test_start_non_admin_is_refused(dispatcher, session: AsyncSession) -> 
     assert await _count_users(session) == 0
 
 
-async def test_start_admin_onboards_and_welcomes(dispatcher, session: AsyncSession) -> None:
+async def test_start_admin_onboards_and_welcomes(
+    dispatcher, session: AsyncSession
+) -> None:
     bot = MockedBot(caller_is_admin=True)
     await feed(dispatcher, bot, make_message("/start", from_id=2002), session=session)
 
@@ -47,10 +50,15 @@ async def test_start_admin_onboards_and_welcomes(dispatcher, session: AsyncSessi
     assert await _is_member(session, 2002)  # admin is onboarded, no /join needed
 
 
-async def test_start_in_private_chat_explains_group_only(dispatcher, session: AsyncSession) -> None:
+async def test_start_in_private_chat_explains_group_only(
+    dispatcher, session: AsyncSession
+) -> None:
     bot = MockedBot(caller_is_admin=False)
     await feed(
-        dispatcher, bot, make_message("/start", chat_type="private", chat_id=3003), session=session
+        dispatcher,
+        bot,
+        make_message("/start", chat_type="private", chat_id=3003),
+        session=session,
     )
 
     assert "private" in (bot.last_reply or "").lower()
@@ -65,14 +73,19 @@ async def test_join_onboards_any_member(dispatcher, session: AsyncSession) -> No
     assert await _is_member(session, 4004)
 
 
-async def test_join_claims_pending_placeholder(dispatcher, session: AsyncSession) -> None:
+async def test_join_claims_pending_placeholder(
+    dispatcher, session: AsyncSession
+) -> None:
     # "ghost" was @mentioned in an expense before ever interacting.
     placeholder = await UserRepository(session).resolve_mention("ghost")
     assert placeholder.telegram_user_id is None
 
     bot = MockedBot(caller_is_admin=False)
     await feed(
-        dispatcher, bot, make_message("/join", from_id=5005, username="ghost"), session=session
+        dispatcher,
+        bot,
+        make_message("/join", from_id=5005, username="ghost"),
+        session=session,
     )
 
     assert "linked" in (bot.last_reply or "").lower()

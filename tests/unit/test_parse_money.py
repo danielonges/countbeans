@@ -1,4 +1,5 @@
 """Unit tests for parse_money — currency-aware amount parsing."""
+
 import pytest
 
 from countbeans.bot.parsing import parse_money

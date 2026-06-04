@@ -46,9 +46,13 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "groups"
 
-    telegram_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
+    telegram_chat_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, nullable=False
+    )
     group_name: Mapped[Optional[str]] = mapped_column(String(255))
-    default_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="SGD")
+    default_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="SGD"
+    )
     simplify_debts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Active event for "active-event mode" (see CLAUDE.md "Events"): when non-NULL
     # it points at the group's single OPEN event and /addexpense & /settleup
@@ -85,12 +89,16 @@ class Event(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
     __tablename__ = "events"
 
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # NULL = inherit groups.default_currency.
     default_currency: Mapped[Optional[str]] = mapped_column(String(3))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
@@ -127,16 +135,26 @@ class EventMember(Base):
 class Expense(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "expenses"
 
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False
+    )
     # NULL = general/regular tracking; else the event this expense is tagged to.
-    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("events.id"))
-    payer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id")
+    )
+    payer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String(255))
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     voided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    voided_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    voided_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
 
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="amount_positive"),
@@ -155,19 +173,25 @@ class ExpenseShare(Base):
     )
     share_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
-    __table_args__ = (
-        CheckConstraint("share_cents >= 0", name="nonneg"),
-    )
+    __table_args__ = (CheckConstraint("share_cents >= 0", name="nonneg"),)
 
 
 class Settlement(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "settlements"
 
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False)
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False
+    )
     # NULL = general/regular tracking; else the event this settlement is tagged to.
-    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("events.id"))
-    from_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    to_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id")
+    )
+    from_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    to_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
 

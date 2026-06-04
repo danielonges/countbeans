@@ -1,4 +1,5 @@
 """Inbound command DTOs — passed from the bot/HTTP adapter into the service core."""
+
 import uuid
 from typing import Literal
 

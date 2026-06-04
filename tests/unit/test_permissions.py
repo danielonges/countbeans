@@ -4,6 +4,7 @@ The real check is a single getChatMember call; here a fake bot returns a member
 with each status so the creator/administrator → True, everyone-else → False
 mapping is pinned without Telegram.
 """
+
 from types import SimpleNamespace
 
 from aiogram.enums import ChatMemberStatus

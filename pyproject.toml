@@ -35,7 +35,11 @@ dev = [
     "watchfiles>=1.2.0",
     "pyright==1.1.410",
     "pre-commit>=4.0.0",
+    "black>=26.5.1",
 ]
+
+[tool.black]
+target-version = ["py314"]
 
 [tool.pyright]
 include = ["src", "tests"]
