@@ -34,8 +34,19 @@ docker compose --profile test down
 
 > **CI:** set `TEST_DATABASE_URL` to a service-container Postgres (or run the Compose `test` service) so integration tests actually run rather than silently skipping.
 
+> **Prefer `make dev` over raw `compose up` for the dev stack.** Migrations are a
+> separate, explicit step applied *before* the bot starts (the bot never
+> auto-migrates — see "Database migrations" below). `make dev` runs `migrate`
+> then brings up the auto-reload stack, so a fresh pull that adds a migration
+> can't start the bot against a stale schema (the `column ... does not exist`
+> failure). The raw `docker compose ... up` below still works but skips that
+> ordering — run `docker compose run --rm migrate` yourself first. See the
+> `Makefile` for `dev` / `up` / `migrate` / `down` / `test` targets.
+
 ```bash
-# Development — auto-reloads bot on code changes (uses compose.dev.yml overlay)
+# Development — migrate first, then the auto-reload stack (preferred)
+make dev
+# …equivalently, the raw command (does NOT apply pending migrations):
 docker compose -f compose.yml -f compose.dev.yml up --build
 
 # Production-like — no auto-reload, code baked into image
