@@ -17,16 +17,22 @@ class UnitOfWork:
         self._session_factory = session_factory
         self._session: AsyncSession | None = None
 
+    def _attach(self, session: AsyncSession) -> None:
+        """Wire the repositories onto a session. Split out so a test harness can
+        bind a UoW to a pre-opened (rolled-back) session without duplicating the
+        repository list."""
+        self.settlements = SettlementRepository(session)
+        self.expenses = ExpenseRepository(session)
+        self.balances = BalanceRepository(session)
+        self.ledger = StatementRepository(session)
+        self.users = UserRepository(session)
+        self.groups = GroupRepository(session)
+        self.group_members = GroupMemberRepository(session)
+
     async def __aenter__(self) -> "UnitOfWork":
         self._session = self._session_factory()
         await self._session.__aenter__()
-        self.settlements = SettlementRepository(self._session)
-        self.expenses = ExpenseRepository(self._session)
-        self.balances = BalanceRepository(self._session)
-        self.ledger = StatementRepository(self._session)
-        self.users = UserRepository(self._session)
-        self.groups = GroupRepository(self._session)
-        self.group_members = GroupMemberRepository(self._session)
+        self._attach(self._session)
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
