@@ -44,5 +44,6 @@ docker compose -f compose.yml -f compose.dev.yml up --build
 docker compose up --build
 ```
 
-See [CLAUDE.md](CLAUDE.md) for the full architecture, database-migration
-workflow, configuration, and product spec.
+See [CLAUDE.md](CLAUDE.md) for the architecture, database-migration workflow, and
+configuration, and [docs/spec.md](docs/spec.md) for the full product spec (design
+principles, command grammar, schema, and algorithms).
