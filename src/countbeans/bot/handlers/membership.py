@@ -62,6 +62,7 @@ async def on_my_chat_member(
     is_admin_now = event.new_chat_member.status in _ADMIN_STATUSES
     was_admin = event.old_chat_member.status in _ADMIN_STATUSES
     present_now = event.new_chat_member.status in _PRESENT_STATUSES
+    was_present = event.old_chat_member.status in _PRESENT_STATUSES
 
     if not present_now:
         # Removed (left/kicked). Best-effort flag clear; the row may not exist.
@@ -77,7 +78,10 @@ async def on_my_chat_member(
         # Freshly added as admin, or just promoted — the moment to introduce itself.
         await bot.send_message(chat.id, GROUP_WELCOME)
         logger.info("bot is now admin in chat=%s — sent welcome", chat.id)
-    elif not is_admin_now:
+    elif not is_admin_now and not was_present:
+        # Freshly added as a non-admin member — ask for promotion. Guard on
+        # `not was_present` so no-op transitions (e.g. group→supergroup upgrade,
+        # where old=member and new=member) don't spam the chat.
         await bot.send_message(chat.id, PROMOTE_REQUEST)
         logger.info("bot lacks admin in chat=%s — requested promotion", chat.id)
 

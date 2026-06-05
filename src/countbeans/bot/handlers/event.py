@@ -107,11 +107,18 @@ async def _new(
     message: Message, uow: UnitOfWork, group: Group, caller_id: uuid.UUID, rest: str
 ) -> None:
     # Name may be quoted (handles @ or spaces) or the bare remaining text.
-    # An optional 3-letter ISO 4217 code after a quoted name sets the event currency.
+    # An optional 3-letter ISO 4217 code sets the event currency — it must follow
+    # a quoted name (e.g. "Bali" IDR) or be the last whitespace-separated token
+    # of an unquoted name (e.g. Bali IDR).
     name, after_name = extract_quoted_description(rest)
     if name is None:
-        name = rest.strip()
-        after_name = ""
+        tokens = rest.strip().split()
+        if len(tokens) >= 2 and len(tokens[-1]) == 3 and tokens[-1].isalpha():
+            name = " ".join(tokens[:-1])
+            after_name = tokens[-1]
+        else:
+            name = rest.strip()
+            after_name = ""
     if not name:
         await message.reply('Usage: /event new "<name>" [CUR]')
         return

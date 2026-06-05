@@ -82,6 +82,19 @@ async def test_removal_clears_flag_without_message(
     assert bot.last_reply is None  # nothing to say when removed
 
 
+async def test_noop_transition_sends_no_message(
+    dispatcher, session: AsyncSession
+) -> None:
+    """group→supergroup migration fires my_chat_member with old=member, new=member.
+    The bot was already present as a non-admin; no PROMOTE_REQUEST should be sent."""
+    await seed_group(session)
+    bot = MockedBot()
+    cmu = make_chat_member_updated(old="member", new="member")
+    await feed_my_chat_member(dispatcher, bot, cmu, session=session)
+
+    assert bot.last_reply is None
+
+
 # --- chat_member: other members join / leave --------------------------------
 
 

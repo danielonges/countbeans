@@ -87,6 +87,30 @@ async def test_event_new_with_currency_stores_and_echoes(
     assert ev is not None and ev.default_currency == "IDR"
 
 
+async def test_event_new_unquoted_name_with_currency(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Unquoted `/event new Bali IDR` — the trailing 3-letter token is the
+    currency, not part of the name."""
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/event new Bali IDR", from_id=1001, username="creator"),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert "Started event" in reply
+    assert "[IDR]" in reply
+    group = await read_group(session)
+    assert group.active_event_id is not None
+    ev = await EventRepository(session).get(group.active_event_id)
+    assert ev is not None
+    assert ev.default_currency == "IDR"
+    assert ev.name == "Bali"  # currency not folded into the name
+
+
 async def test_addexpense_uses_event_default_currency(
     dispatcher, session: AsyncSession
 ) -> None:
