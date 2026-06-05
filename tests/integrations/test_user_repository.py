@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, Group, User
-from countbeans.services.repositories import UserRepository
+from countbeans.services.repositories import GroupMemberRepository, UserRepository
 
 
 async def _count_users(session: AsyncSession) -> int:
@@ -58,11 +58,21 @@ async def test_upsert_existing_user_refreshes_fields_no_duplicate(
 
 async def test_upsert_claims_pending_placeholder(session: AsyncSession) -> None:
     repo = UserRepository(session)
+    group = _group()
+    session.add(group)
+    await session.flush()
     placeholder = await repo.resolve_mention("bob")  # mentioned, never seen
+    await GroupMemberRepository(session).ensure_member(group.id, placeholder.id)
     assert placeholder.telegram_user_id is None
 
+    # Claiming is gated on the interaction's group (security review #1): bob's
+    # placeholder lives in this group, so the claim proceeds.
     claimed = await repo.upsert(
-        telegram_user_id=200, username="bob", first_name="Bob", last_name=None
+        telegram_user_id=200,
+        username="bob",
+        first_name="Bob",
+        last_name=None,
+        claim_in_group=group.id,
     )
 
     # Same surrogate row — claiming is an UPDATE, not a new insert.
@@ -70,6 +80,61 @@ async def test_upsert_claims_pending_placeholder(session: AsyncSession) -> None:
     assert claimed.telegram_user_id == 200
     assert claimed.first_name == "Bob"
     assert await _count_users(session) == 1
+
+
+async def test_claim_allowed_when_placeholder_in_same_group(
+    session: AsyncSession,
+) -> None:
+    """The claim fires when the placeholder is a member of the interaction's group."""
+    repo = UserRepository(session)
+    group = _group()
+    session.add(group)
+    await session.flush()
+    placeholder = await repo.resolve_mention("alice")
+    await GroupMemberRepository(session).ensure_member(group.id, placeholder.id)
+
+    claimed = await repo.upsert(
+        telegram_user_id=999,
+        username="alice",
+        first_name="A",
+        last_name=None,
+        claim_in_group=group.id,
+    )
+    assert claimed.id == placeholder.id
+    assert claimed.telegram_user_id == 999
+    assert await _count_users(session) == 1
+
+
+async def test_claim_refused_when_placeholder_in_other_group(
+    session: AsyncSession,
+) -> None:
+    """A placeholder created in group A is NOT claimed by a same-username user
+    interacting in an unrelated group B — the cross-group hijack the gate blocks
+    (security review #1)."""
+    repo = UserRepository(session)
+    gm = GroupMemberRepository(session)
+    group_a = Group(id=uuid_utils.uuid7(), telegram_chat_id=1, default_currency="SGD")
+    group_b = Group(id=uuid_utils.uuid7(), telegram_chat_id=2, default_currency="SGD")
+    session.add_all([group_a, group_b])
+    await session.flush()
+    placeholder = await repo.resolve_mention("alice")
+    await gm.ensure_member(group_a.id, placeholder.id)  # placeholder lives in A only
+
+    claimed = await repo.upsert(
+        telegram_user_id=999,
+        username="alice",
+        first_name="A",
+        last_name=None,
+        claim_in_group=group_b.id,  # interacting in B
+    )
+
+    assert claimed.id != placeholder.id  # a fresh claimed row, not the placeholder
+    assert claimed.telegram_user_id == 999
+    reread = (
+        await session.execute(select(User).where(User.id == placeholder.id))
+    ).scalar_one()
+    assert reread.telegram_user_id is None  # group-A placeholder still unclaimed
+    assert await _count_users(session) == 2
 
 
 async def test_claim_preserves_existing_ledger_rows(session: AsyncSession) -> None:
@@ -83,6 +148,9 @@ async def test_claim_preserves_existing_ledger_rows(session: AsyncSession) -> No
     placeholder = await repo.resolve_mention("charlie")
     session.add(group)
     await session.flush()
+    # The placeholder is a member of the group (every mention ensures this), so the
+    # group-scoped claim gate (security review #1) lets the claim through.
+    await GroupMemberRepository(session).ensure_member(group.id, placeholder.id)
 
     expense = Expense(
         id=uuid_utils.uuid7(),
@@ -100,7 +168,11 @@ async def test_claim_preserves_existing_ledger_rows(session: AsyncSession) -> No
     await session.flush()
 
     claimed = await repo.upsert(
-        telegram_user_id=400, username="charlie", first_name="Charlie", last_name=None
+        telegram_user_id=400,
+        username="charlie",
+        first_name="Charlie",
+        last_name=None,
+        claim_in_group=group.id,
     )
     assert claimed.id == placeholder.id
 

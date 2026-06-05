@@ -58,14 +58,18 @@ async def test_onboard_fresh_user(session: AsyncSession) -> None:
 
 async def test_onboard_claims_pending_placeholder(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
-    # bob was @mentioned in an expense before ever interacting.
+    # bob was @mentioned before ever interacting — the placeholder lives in this
+    # group (every mention ensures group membership), so the group-scoped claim
+    # gate (security review #1) lets the join claim it.
+    group = await uow.groups.upsert(telegram_chat_id=1, group_name="G")
     placeholder = await uow.users.resolve_mention("bob")
+    await uow.group_members.ensure_member(group.id, placeholder.id)
     assert placeholder.telegram_user_id is None
 
     result = await onboard_member(uow, _cmd(telegram_user_id=200))  # type: ignore[arg-type]
 
     assert result.claimed_placeholder is True
-    assert result.newly_added is True
+    assert result.newly_added is False  # already a member as the placeholder
     assert result.user_id == placeholder.id  # claimed in place, not duplicated
     assert await _count_users(session) == 1
 

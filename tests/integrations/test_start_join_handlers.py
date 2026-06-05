@@ -10,9 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import GroupMember, User
-from countbeans.services.repositories import UserRepository
 
 from ._bot_harness import MockedBot, feed, make_message
+from ._seed import seed_group, seed_placeholder
 
 
 async def _count_users(session: AsyncSession) -> int:
@@ -76,8 +76,11 @@ async def test_join_onboards_any_member(dispatcher, session: AsyncSession) -> No
 async def test_join_claims_pending_placeholder(
     dispatcher, session: AsyncSession
 ) -> None:
-    # "ghost" was @mentioned in an expense before ever interacting.
-    placeholder = await UserRepository(session).resolve_mention("ghost")
+    # "ghost" was @mentioned before ever interacting — the placeholder lives in
+    # this group (a mention ensures membership), so the group-scoped claim gate
+    # (security review #1) lets /join claim it.
+    group = await seed_group(session)
+    placeholder = await seed_placeholder(session, group, username="ghost")
     assert placeholder.telegram_user_id is None
 
     bot = MockedBot(caller_is_admin=False)

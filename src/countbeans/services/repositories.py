@@ -292,13 +292,25 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def pending_placeholder(self, username: str) -> User | None:
-        """The pending placeholder for a username (telegram_user_id IS NULL), if
-        any. App invariant: at most one per username."""
+    async def pending_placeholder(
+        self, username: str, group_id: uuid.UUID
+    ) -> User | None:
+        """The pending placeholder for ``username`` (telegram_user_id IS NULL) that
+        is an active member of ``group_id`` — the gate that lets a claim proceed.
+
+        Scoping to a group the placeholder was actually referenced in (every
+        mention ensures the placeholder onto group_members) stops a stranger who
+        registers the same @handle in an *unrelated* group from inheriting its
+        ledger (security review #1). App invariant: at most one pending placeholder
+        per username globally, so this still resolves to one row."""
         result = await self._session.execute(
-            select(User).where(
+            select(User)
+            .join(GroupMember, GroupMember.user_id == User.id)
+            .where(
                 User.username == username,
                 User.telegram_user_id.is_(None),
+                GroupMember.group_id == group_id,
+                GroupMember.left_at.is_(None),
             )
         )
         return result.scalar_one_or_none()
@@ -309,6 +321,8 @@ class UserRepository:
         username: str | None,
         first_name: str | None,
         last_name: str | None,
+        *,
+        claim_in_group: uuid.UUID | None = None,
     ) -> User:
         """Onboard or refresh the interacting user, claiming a placeholder if one
         is waiting.
@@ -318,6 +332,11 @@ class UserRepository:
         every expense_share / settlement already bound to that surrogate
         users.id follows automatically — no fan-out rewrite (CLAUDE.md
         "Onboarding & membership").
+
+        The claim is **gated on ``claim_in_group``**: it fires only when a group is
+        given AND the placeholder is a member of it (see pending_placeholder), so a
+        claim can't reach across groups (security review #1). Callers without a
+        group context (seeds/tests) pass None and never claim.
         """
         # Already a claimed identity: refresh the display alias and names.
         existing = await self.get_by_telegram_id(telegram_user_id)
@@ -328,9 +347,10 @@ class UserRepository:
             await self._session.flush()
             return existing
 
-        # First interaction: claim a matching pending placeholder if present.
-        if username is not None:
-            placeholder = await self.pending_placeholder(username)
+        # First interaction: claim a matching pending placeholder, but only one that
+        # belongs to the group this interaction is happening in.
+        if username is not None and claim_in_group is not None:
+            placeholder = await self.pending_placeholder(username, claim_in_group)
             if placeholder is not None:
                 placeholder.telegram_user_id = telegram_user_id
                 placeholder.first_name = first_name

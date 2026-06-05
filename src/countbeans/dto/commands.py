@@ -22,6 +22,21 @@ class OnboardUserCommand(BaseModel):
     group_name: str | None = None
 
 
+class MentionedUser(BaseModel):
+    """A mention the bot resolved to a real Telegram identity via a message
+    ``text_mention`` entity (a user without a public @handle, or a tap-selected
+    user) — it carries the permanent ``telegram_user_id``, so it resolves to a
+    *claimed* user, never a username placeholder (security review #1). aiogram-free
+    so the service core stays decoupled from the bot layer."""
+
+    model_config = ConfigDict(frozen=True)
+
+    telegram_user_id: int
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+
+
 class SettleUpCommand(BaseModel):
     model_config = ConfigDict(frozen=True)
 

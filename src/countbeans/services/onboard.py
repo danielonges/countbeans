@@ -17,20 +17,26 @@ from .uow import UnitOfWork
 
 
 async def onboard_member(uow: UnitOfWork, cmd: OnboardUserCommand) -> OnboardResult:
-    # Detect a placeholder claim BEFORE upsert mutates state: the caller is
-    # unknown by telegram_id but a pending placeholder waits under their @handle.
-    # upsert() performs the actual claim; this read just reports that it happened.
     logger.debug(
         "onboard_member: telegram_user_id=%s username=%s chat_id=%s",
         cmd.telegram_user_id,
         cmd.username,
         cmd.telegram_chat_id,
     )
+    # Resolve the group first — the placeholder claim is group-scoped, so we need
+    # group.id to both detect and perform it (security review #1).
+    group = await uow.groups.upsert(
+        telegram_chat_id=cmd.telegram_chat_id,
+        group_name=cmd.group_name,
+    )
+    # Detect a placeholder claim BEFORE upsert mutates state: the caller is unknown
+    # by telegram_id but a pending placeholder waits under their @handle *in this
+    # group*. upsert() performs the actual claim; this read just reports it happened.
     existing = await uow.users.get_by_telegram_id(cmd.telegram_user_id)
     claimed_placeholder = (
         existing is None
         and cmd.username is not None
-        and await uow.users.pending_placeholder(cmd.username) is not None
+        and await uow.users.pending_placeholder(cmd.username, group.id) is not None
     )
 
     user = await uow.users.upsert(
@@ -38,10 +44,7 @@ async def onboard_member(uow: UnitOfWork, cmd: OnboardUserCommand) -> OnboardRes
         username=cmd.username,
         first_name=cmd.first_name,
         last_name=cmd.last_name,
-    )
-    group = await uow.groups.upsert(
-        telegram_chat_id=cmd.telegram_chat_id,
-        group_name=cmd.group_name,
+        claim_in_group=group.id,
     )
     newly_added = await uow.group_members.ensure_member(group.id, user.id)
 

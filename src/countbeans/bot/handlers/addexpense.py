@@ -12,6 +12,7 @@ import logging
 import re
 
 from aiogram import Bot, Router
+from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -21,7 +22,7 @@ from countbeans.bot.utils.parsing import (
     is_all,
     parse_money,
 )
-from countbeans.dto.commands import AddExpenseCommand
+from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.uow import UnitOfWork
 
@@ -60,15 +61,17 @@ async def cmd_addexpense(
         await message.reply(_USAGE)
         return
 
+    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
+    group = await uow.groups.upsert(
+        telegram_chat_id=message.chat.id,
+        group_name=getattr(message.chat, "title", None),
+    )
     payer = await uow.users.upsert(
         telegram_user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
-    )
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
+        claim_in_group=group.id,
     )
 
     # Active-event mode: when the group has an active event, auto-tag this expense
@@ -100,8 +103,24 @@ async def cmd_addexpense(
     # only real handles (an empty list then *means* everyone). Mixing @all with
     # named handles drops the @all and splits among the named (CLAUDE.md).
     named = [h for h in _MENTION_RE.findall(rest) if not is_all(h)]
+    # A text_mention entity carries a real telegram_user_id (a user without a public
+    # @handle, or a tap-selected one) → resolve to a claimed user, never a username
+    # placeholder (security review #1). NOTE: entities are read from the whole
+    # message, so a tap-mention placed inside the quoted description would also be
+    # counted as a participant (typed @handles inside it are already stripped). Rare,
+    # and the echoed "Split among" line surfaces it.
+    mentioned = [
+        MentionedUser(
+            telegram_user_id=e.user.id,
+            username=e.user.username,
+            first_name=e.user.first_name,
+            last_name=e.user.last_name,
+        )
+        for e in (message.entities or [])
+        if e.type == MessageEntityType.TEXT_MENTION and e.user is not None
+    ]
     participants = await resolve_participants(
-        uow, group.id, payer.id, named, event_id=event_id
+        uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
     )
 
     try:
@@ -156,7 +175,7 @@ async def cmd_addexpense(
     # When splitting the whole group, warn if the bot can't see everyone — it can
     # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside
     # an event, @all means the roster (an intentional subset), so this gate is skipped.
-    if active is None and not named:
+    if active is None and not named and not mentioned:
         try:
             actual = (
                 await bot.get_chat_member_count(message.chat.id) - 1

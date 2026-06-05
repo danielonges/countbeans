@@ -3,16 +3,22 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense
+from countbeans.db.models import Expense, ExpenseShare
 from countbeans.services.repositories import UserRepository
 
-from ._bot_harness import MockedBot, feed, make_message
-from ._seed import seed_group
+from ._bot_harness import MockedBot, feed, make_message, text_mention_entity
+from ._seed import seed_group, seed_member
 
 
 async def _expense_count(session: AsyncSession) -> int:
     return (
         await session.execute(select(func.count()).select_from(Expense))
+    ).scalar_one()
+
+
+async def _share_count(session: AsyncSession) -> int:
+    return (
+        await session.execute(select(func.count()).select_from(ExpenseShare))
     ).scalar_one()
 
 
@@ -48,6 +54,65 @@ async def test_addexpense_records_named_split(
     # The named-but-unseen @bob becomes a pending placeholder.
     bob = await UserRepository(session).find_by_mention("bob")
     assert bob is not None and bob.telegram_user_id is None
+
+
+async def test_addexpense_text_mention_resolves_to_claimed_user(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A text_mention carries a real telegram id → the participant is a CLAIMED
+    user, never a username placeholder (security review #1). A text_mention with no
+    typed @handle splits among the mention, not the whole group."""
+    group = await seed_group(session)
+    # Another known member, so a "split everyone" would include >1 person.
+    await seed_member(session, group, telegram_user_id=3003, username="carol")
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            "/addexpense 30 lunch",
+            from_id=1001,
+            username="payer",
+            entities=[text_mention_entity(2002, first_name="Bob")],
+        ),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "Added expense" in reply
+    assert "Bob" in reply  # the mention is in the split
+    assert "carol" not in reply  # NOT split-everyone — only the named mention
+    # Bob is a claimed user (real telegram id), not a pending placeholder.
+    bob = await UserRepository(session).get_by_telegram_id(2002)
+    assert bob is not None and bob.telegram_user_id == 2002
+    assert await _share_count(session) == 1  # payer paid; only Bob owes a share
+
+
+async def test_addexpense_text_mention_plus_typed_handle(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A text_mention (claimed) and a typed @handle (placeholder) both join the split."""
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            "/addexpense 30 @alice",
+            from_id=1001,
+            username="payer",
+            entities=[text_mention_entity(2002, first_name="Bob")],
+        ),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "Bob" in reply and "@alice" in reply
+    bob = await UserRepository(session).get_by_telegram_id(2002)
+    assert bob is not None  # claimed via the real id
+    alice = await UserRepository(session).find_by_mention("alice")
+    assert alice is not None and alice.telegram_user_id is None  # still a placeholder
+    assert await _share_count(session) == 2
 
 
 async def test_addexpense_whole_group_warns_about_unseen_members(

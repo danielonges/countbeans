@@ -25,9 +25,9 @@ from countbeans.services.repositories import (
 from ._bot_harness import DEFAULT_CHAT_ID, HarnessUoW
 
 
-async def seed_group(session: AsyncSession) -> Group:
+async def seed_group(session: AsyncSession, *, chat_id: int = DEFAULT_CHAT_ID) -> Group:
     return await GroupRepository(session).upsert(
-        telegram_chat_id=DEFAULT_CHAT_ID, group_name="Test Group"
+        telegram_chat_id=chat_id, group_name="Test Group"
     )
 
 
@@ -55,6 +55,17 @@ async def seed_member(
         first_name=first_name or username.capitalize(),
         last_name=None,
     )
+    await GroupMemberRepository(session).ensure_member(group.id, user.id)
+    return user
+
+
+async def seed_placeholder(
+    session: AsyncSession, group: Group, *, username: str
+) -> User:
+    """Create a pending placeholder (telegram_user_id IS NULL) and add it to the
+    group — mirroring how a real mention (`/addexpense @x`) tracks an unseen user,
+    so the group-scoped claim gate (security review #1) sees it as referenced here."""
+    user = await UserRepository(session).resolve_mention(username)
     await GroupMemberRepository(session).ensure_member(group.id, user.id)
     return user
 

@@ -27,7 +27,7 @@ from ._bot_harness import (
     make_chat_member_updated,
     make_message,
 )
-from ._seed import read_group, seed_group, seed_member
+from ._seed import read_group, seed_group, seed_member, seed_placeholder
 
 # --- my_chat_member: the bot's own status -----------------------------------
 
@@ -113,8 +113,10 @@ async def test_join_onboards_member(dispatcher, session: AsyncSession) -> None:
 async def test_join_claims_pending_placeholder(
     dispatcher, session: AsyncSession
 ) -> None:
-    await seed_group(session)
-    placeholder = await UserRepository(session).resolve_mention("newbie")
+    group = await seed_group(session)
+    # The placeholder lives in this group (a mention ensures membership), so the
+    # group-scoped claim gate (security review #1) lets the join claim it.
+    placeholder = await seed_placeholder(session, group, username="newbie")
     assert placeholder.telegram_user_id is None
 
     bot = MockedBot()

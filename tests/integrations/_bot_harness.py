@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import MessageEntityType
 from aiogram.methods import (
     AnswerCallbackQuery,
     EditMessageReplyMarkup,
@@ -43,6 +44,7 @@ from aiogram.types import (
     ChatMemberOwner,
     ChatMemberUpdated,
     Message,
+    MessageEntity,
     Update,
     User,
 )
@@ -174,8 +176,10 @@ def make_message(
     first_name: str = "Caller",
     chat_id: int = DEFAULT_CHAT_ID,
     chat_type: str = "supergroup",
+    entities: list[MessageEntity] | None = None,
 ) -> Message:
-    """Construct a group (default) or private message carrying `text`."""
+    """Construct a group (default) or private message carrying `text` (and any
+    message `entities`, e.g. a text_mention)."""
     return Message(
         message_id=1,
         date=datetime.now(timezone.utc),
@@ -184,6 +188,26 @@ def make_message(
             id=from_id, is_bot=False, first_name=first_name, username=username
         ),
         text=text,
+        entities=entities,
+    )
+
+
+def text_mention_entity(
+    user_id: int,
+    *,
+    first_name: str = "Mentioned",
+    username: str | None = None,
+    offset: int = 0,
+    length: int = 1,
+) -> MessageEntity:
+    """A `text_mention` entity carrying a real user id — what Telegram sends for a
+    user without a public @handle, which the bot resolves to a claimed user
+    (security review #1). offset/length are nominal; the handler reads `.user`."""
+    return MessageEntity(
+        type=MessageEntityType.TEXT_MENTION,
+        offset=offset,
+        length=length,
+        user=User(id=user_id, is_bot=False, first_name=first_name, username=username),
     )
 
 

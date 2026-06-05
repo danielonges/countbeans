@@ -88,15 +88,17 @@ async def cmd_statements(
     args = (command.args or "").split()
     group_wide = is_all_selector(args)
 
+    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
+    group = await uow.groups.upsert(
+        telegram_chat_id=message.chat.id,
+        group_name=getattr(message.chat, "title", None),
+    )
     caller = await uow.users.upsert(
         telegram_user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
-    )
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
+        claim_in_group=group.id,
     )
     await uow.group_members.ensure_member(group.id, caller.id)
 
@@ -144,6 +146,7 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
             username=callback.from_user.username,
             first_name=callback.from_user.first_name,
             last_name=callback.from_user.last_name,
+            claim_in_group=group.id,
         )
         page = await get_statement_page(uow, group.id, user_id=viewer.id, page=page_no)
         title, cb_prefix = "📋 Your statement", f"stmt:u:{subject_tg}"

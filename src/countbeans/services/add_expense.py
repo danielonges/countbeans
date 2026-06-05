@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
 
 from countbeans.db.models import Expense
-from countbeans.dto.commands import AddExpenseCommand
+from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.dto.domain import MemberInfo
 from countbeans.dto.results import ExpenseCreatedResult
 
@@ -23,32 +23,37 @@ async def resolve_participants(
     payer_id: uuid.UUID,
     named_handles: list[str],
     *,
+    mentioned_users: list[MentionedUser] | None = None,
     event_id: uuid.UUID | None = None,
 ) -> list[MemberInfo]:
-    """Resolve who an expense is split among, from the named @handles parsed off
-    the command. The ``@all`` keyword is bot-layer grammar: the handler strips it
+    """Resolve who an expense is split among, from the @handles parsed off the
+    command plus any ``text_mention`` entities the bot resolved to real Telegram
+    identities. The ``@all`` keyword is bot-layer grammar: the handler strips it
     (and recognizes "split everyone") via ``parsing.is_all`` before calling here,
     so this function never sees the literal — an empty list *is* "split everyone".
 
-    * **No named handles** → every member the bot knows in the group, the payer
-      included.
-    * **Named handles** → exactly those users; the payer is **not** added
-      automatically — mention yourself to be included. Unknown handles become
-      pending placeholders.
+    * **No participants named at all** → every member the bot knows in the group,
+      the payer included.
+    * **Named participants** → exactly those users; the payer is **not** added
+      automatically — mention yourself to be included.
+      - ``mentioned_users`` carry a real ``telegram_user_id`` → resolve to a
+        **claimed** user (hijack-proof, no username placeholder; security review #1).
+      - unknown ``named_handles`` become pending placeholders.
 
     When ``event_id`` is given the scope is the **event roster** (a deliberate
     opt-in subset of the group): an empty list splits the roster — no group
-    coverage check, since the roster is intentional — and named handles join the
-    roster implicitly (CLAUDE.md "Events"). The payer is always ensured onto the
-    group (and the event roster, when scoped) first, so a "split everyone"
+    coverage check, since the roster is intentional — and named participants join
+    the roster implicitly (CLAUDE.md "Events"). The payer is always ensured onto
+    the group (and the event roster, when scoped) first, so a "split everyone"
     reflects them and a payer who only ever pays still appears. Returns one
     MemberInfo per participant, deduplicated, order preserved.
     """
+    mentioned_users = mentioned_users or []
     await uow.group_members.ensure_member(group_id, payer_id)
     if event_id is not None:
         await uow.events.ensure_member(event_id, payer_id)
 
-    if not named_handles:
+    if not named_handles and not mentioned_users:
         scope = f"event={event_id}" if event_id else "group"
         logger.debug("resolve_participants: split=everyone scope=%s", scope)
         if event_id is not None:
@@ -57,8 +62,8 @@ async def resolve_participants(
 
     participants: list[MemberInfo] = []
     seen: set[uuid.UUID] = set()
-    for handle in named_handles:
-        user = await uow.users.resolve_mention(handle)
+
+    async def _add(user) -> None:
         await uow.group_members.ensure_member(group_id, user.id)
         if event_id is not None:
             await uow.events.ensure_member(event_id, user.id)
@@ -72,6 +77,21 @@ async def resolve_participants(
                 )
             )
             seen.add(user.id)
+
+    # Real-id mentions first: a text_mention gives us the permanent telegram_user_id,
+    # so resolve straight to a claimed user (claim_in_group converges a matching
+    # in-group placeholder) — never a username placeholder.
+    for m in mentioned_users:
+        user = await uow.users.upsert(
+            telegram_user_id=m.telegram_user_id,
+            username=m.username,
+            first_name=m.first_name,
+            last_name=m.last_name,
+            claim_in_group=group_id,
+        )
+        await _add(user)
+    for handle in named_handles:
+        await _add(await uow.users.resolve_mention(handle))
     logger.debug("resolve_participants: split=named count=%d", len(participants))
     return participants
 

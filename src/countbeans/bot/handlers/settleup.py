@@ -114,6 +114,7 @@ async def cmd_settleup(
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
+        claim_in_group=group.id,
     )
     await uow.group_members.ensure_member(group.id, from_user.id)
 
@@ -246,6 +247,7 @@ async def _settle_on_behalf(
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
+        claim_in_group=group.id,
     )
     await uow.group_members.ensure_member(group.id, actor.id)
     result = await _record(

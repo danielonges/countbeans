@@ -23,6 +23,7 @@ import re
 import uuid
 
 from aiogram import Bot, Router
+from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -100,15 +101,17 @@ async def cmd_event(
         )
         return
 
+    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
+    group = await uow.groups.upsert(
+        telegram_chat_id=message.chat.id,
+        group_name=getattr(message.chat, "title", None),
+    )
     caller = await uow.users.upsert(
         telegram_user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
-    )
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
+        claim_in_group=group.id,
     )
     await uow.group_members.ensure_member(group.id, caller.id)
 
@@ -232,6 +235,44 @@ async def _roster(
     if open_event is None:
         await message.reply('No open event. Start one with /event new "<name>" first.')
         return
+
+    # A text_mention (a user without a public @handle, or tap-selected) carries a
+    # real telegram_user_id → resolve to a claimed user, never a username
+    # placeholder (security review #1). Supported for `add`; removal is by @handle.
+    text_mention = next(
+        (
+            e
+            for e in (message.entities or [])
+            if e.type == MessageEntityType.TEXT_MENTION
+        ),
+        None,
+    )
+    if action == "add" and text_mention is not None and text_mention.user is not None:
+        tu = text_mention.user
+        user = await uow.users.upsert(
+            telegram_user_id=tu.id,
+            username=tu.username,
+            first_name=tu.first_name,
+            last_name=tu.last_name,
+            claim_in_group=group.id,
+        )
+        await uow.group_members.ensure_member(group.id, user.id)
+        changed = await edit_event_roster(
+            uow,
+            EditEventRosterCommand(
+                event_id=open_event.id, user_id=user.id, action="add"
+            ),
+        )
+        label = display_name(user.username, user.first_name)
+        note = (
+            f'Added {label} to "{open_event.name}".'
+            if changed
+            else f"{label} is already on the roster."
+        )
+        roster = await uow.events.list_members(open_event.id)
+        await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
+        return
+
     mention = _MENTION_RE.search(rest)
     if mention is None:
         await message.reply(f"Usage: /event {action} @user")
