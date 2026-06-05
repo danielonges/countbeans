@@ -484,20 +484,17 @@ class GroupMemberRepository:
         """Set left_at on the user's active membership (left_at IS NULL), driven
         by the chat_member leave stream. Returns True when a row was updated,
         False when the user had no active membership."""
-        member = (
-            await self._session.execute(
-                select(GroupMember).where(
-                    GroupMember.group_id == group_id,
-                    GroupMember.user_id == user_id,
-                    GroupMember.left_at.is_(None),
-                )
+        result = await self._session.execute(
+            update(GroupMember)
+            .where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == user_id,
+                GroupMember.left_at.is_(None),
             )
-        ).scalar_one_or_none()
-        if member is None:
-            return False
-        member.left_at = _now()
-        await self._session.flush()
-        return True
+            .values(left_at=_now())
+            .returning(GroupMember.user_id)
+        )
+        return result.first() is not None
 
 
 class EventRepository:
@@ -544,6 +541,22 @@ class EventRepository:
             await self._session.flush()
             return True
         return False
+
+    async def bulk_ensure_members(
+        self, event_id: uuid.UUID, user_ids: list[uuid.UUID]
+    ) -> int:
+        """Add roster rows for all user_ids not already present in one INSERT.
+        Returns the number of newly added rows."""
+        if not user_ids:
+            return 0
+        stmt = (
+            pg_insert(EventMember)
+            .values([{"event_id": event_id, "user_id": uid} for uid in user_ids])
+            .on_conflict_do_nothing()
+            .returning(EventMember.user_id)
+        )
+        result = await self._session.execute(stmt)
+        return len(result.fetchall())
 
     async def remove_member(self, event_id: uuid.UUID, user_id: uuid.UUID) -> bool:
         """Drop a roster row. Returns True when one was removed, False if absent."""

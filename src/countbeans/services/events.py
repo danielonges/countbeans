@@ -101,10 +101,7 @@ async def add_group_to_roster(
     on an expense, "everyone" means everyone the bot knows (placeholders
     included); it can't enumerate members it has never seen."""
     members = await uow.group_members.list_members(group_id)
-    added = 0
-    for m in members:
-        if await uow.events.ensure_member(event_id, m.user_id):
-            added += 1
+    added = await uow.events.bulk_ensure_members(event_id, [m.user_id for m in members])
     logger.debug("add_group_to_roster: event=%s added=%d", event_id, added)
     return added
 
