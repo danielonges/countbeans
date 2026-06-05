@@ -68,13 +68,13 @@ async def settle_up(
     )
     if owed <= 0:
         raise ValueError(
-            f"The suggested settlement doesn't have you paying that person in "
-            f"{cmd.currency}. Run /balance all to see who to pay."
+            f"That settlement isn't a suggested payment in {cmd.currency} — no "
+            "debt runs in that direction. Run /balance all to see who owes whom."
         )
     if cmd.amount_cents > owed:
         raise ValueError(
-            f"You only owe {_fmt(owed, cmd.currency)} there — settle that or "
-            "less, or omit the amount to settle in full."
+            f"Only {_fmt(owed, cmd.currency)} is owed in that direction — settle "
+            "that or less, or omit the amount to settle in full."
         )
 
     settlement_id = uuid_utils.uuid7()

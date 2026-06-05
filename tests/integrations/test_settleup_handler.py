@@ -25,6 +25,17 @@ async def _seed_caller_owes_bob(session: AsyncSession) -> None:
     )
 
 
+async def _seed_alice_owes_bob(session: AsyncSession) -> None:
+    """Two members (neither the caller) with a debt: alice owes bob SGD 5 — the
+    on-behalf shape, e.g. when alice has since left the group."""
+    group = await seed_group(session)
+    alice = await seed_member(session, group, telegram_user_id=3003, username="alice")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    await seed_expense(
+        session, group, payer=bob, participants=[alice, bob], amount_cents=1000
+    )
+
+
 async def test_settleup_usage_on_bad_args(dispatcher, session: AsyncSession) -> None:
     bot = MockedBot()
     await feed(dispatcher, bot, make_message("/settleup"), session=session)
@@ -96,3 +107,106 @@ async def test_settleup_all_by_admin_clears_group(
 
     assert "whole group" in (bot.last_reply or "").lower()
     assert await _settlement_count(session) == 1  # the one outstanding transfer
+
+
+async def test_settleup_pair_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=False)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @alice @bob", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "admin" in (bot.last_reply or "").lower()
+    assert await _settlement_count(session) == 0  # nothing recorded
+
+
+async def test_settleup_pair_by_admin_records_full_owed(
+    dispatcher, session: AsyncSession
+) -> None:
+    """An admin clears a debt between two *other* members (the departed-member
+    case) — amount omitted settles the full SGD 5 alice owes bob."""
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @alice @bob", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "Recorded" in reply
+    assert "5.00" in reply
+    # The recipient (still in the group) is pinged to confirm the logged payment.
+    assert "@bob — flag it" in reply
+    assert await _settlement_count(session) == 1
+
+
+async def test_settleup_pair_records_explicit_amount(
+    dispatcher, session: AsyncSession
+) -> None:
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @alice @bob 3", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "3.00" in (bot.last_reply or "")
+    assert await _settlement_count(session) == 1
+
+
+async def test_settleup_pair_rejects_all_keyword(
+    dispatcher, session: AsyncSession
+) -> None:
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @alice @all", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "@all" in (bot.last_reply or "")
+    assert await _settlement_count(session) == 0
+
+
+async def test_settleup_pair_unknown_handle_rejected(
+    dispatcher, session: AsyncSession
+) -> None:
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @nobody @bob 3", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "don't know @nobody" in (bot.last_reply or "")
+    assert await _settlement_count(session) == 0
+
+
+async def test_settleup_pair_wrong_direction_rejected(
+    dispatcher, session: AsyncSession
+) -> None:
+    """alice owes bob, so recording bob→alice has no suggested payment."""
+    await _seed_alice_owes_bob(session)
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob @alice 3", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "debt runs in that direction" in (bot.last_reply or "")
+    assert await _settlement_count(session) == 0

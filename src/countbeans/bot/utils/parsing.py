@@ -1,6 +1,35 @@
 """Shared parsing helpers for the bot's command handlers."""
 
 import re
+from collections.abc import Sequence
+
+# The reserved "everyone" keyword. It denotes the same word in two grammatical
+# families (see CLAUDE.md "The @all / all keyword") — only the spelling differs:
+#   * Family 1 — `@all`, a token in the @mention/target namespace, sitting among
+#     @username args (/addexpense participants, /settleup target, /event roster).
+#     Test an already-extracted @handle (without the @) with `is_all`.
+#   * Family 2 — bare `all`, a positional view selector that pairs with `me`
+#     (/balance all, /statements all). Test the split args with `is_all_selector`.
+# Both go through the same single comparison below, so the keyword lives in one
+# place and the two families can never drift apart.
+ALL_KEYWORD = "all"
+
+
+def is_all(token: str) -> bool:
+    """True if ``token`` is the reserved everyone-keyword (case-insensitive).
+
+    Family 1 — call on an @handle already stripped of its leading ``@`` (as
+    /addexpense, /settleup, and /event do)."""
+    return token.casefold() == ALL_KEYWORD
+
+
+def is_all_selector(args: Sequence[str]) -> bool:
+    """True if the command's first positional arg is the bare ``all`` selector.
+
+    Family 2 — /balance all, /statements all. ``args`` is the whitespace-split
+    message text, with the command itself at index 0."""
+    return len(args) > 1 and is_all(args[1])
+
 
 # Opening → closing quote characters accepted around a description. Covers the
 # straight ASCII quotes and the "smart"/curly quotes mobile keyboards substitute

@@ -201,7 +201,7 @@ async def test_settle_up_payer_has_no_debt_rejected(session: AsyncSession) -> No
     uow = _SessionUoW(session)
 
     # alice tries to pay bob even though alice is owed money
-    with pytest.raises(ValueError, match="doesn't have you paying"):
+    with pytest.raises(ValueError, match="debt runs in that direction"):
         await settle_up(uow, _cmd(group, alice, bob), simplify_debts=True)  # type: ignore[arg-type]
 
 
@@ -214,7 +214,7 @@ async def test_settle_up_recipient_not_owed_rejected(session: AsyncSession) -> N
     uow = _SessionUoW(session)
 
     # bob owes alice, but tries to pay charlie (who is owed nothing)
-    with pytest.raises(ValueError, match="doesn't have you paying"):
+    with pytest.raises(ValueError, match="debt runs in that direction"):
         await settle_up(uow, _cmd(group, bob, charlie), simplify_debts=True)  # type: ignore[arg-type]
 
 
@@ -226,7 +226,7 @@ async def test_settle_up_overpayment_rejected(session: AsyncSession) -> None:
     await _add_expense(session, group, payee, [payer, payee], amount_cents=2000)
     uow = _SessionUoW(session)
 
-    with pytest.raises(ValueError, match="only owe"):
+    with pytest.raises(ValueError, match="is owed in that direction"):
         await settle_up(uow, _cmd(group, payer, payee, amount_cents=1500), simplify_debts=True)  # type: ignore[arg-type]
 
     # No settlement row was written.
@@ -274,7 +274,7 @@ async def test_settle_up_caps_at_suggested_not_net_debt(session: AsyncSession) -
     assert owed == {"SGD": 3000}
 
     # Trying to dump the whole 5000 net debt on alice is rejected.
-    with pytest.raises(ValueError, match="only owe"):
+    with pytest.raises(ValueError, match="is owed in that direction"):
         await settle_up(uow, _cmd(group, caller, alice, amount_cents=5000), simplify_debts=True)  # type: ignore[arg-type]
 
     # Settling exactly what's owed to alice succeeds.
