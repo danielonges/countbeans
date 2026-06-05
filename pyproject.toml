@@ -30,6 +30,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
+assets = [
+    "numpy>=2.0",
+    "Pillow>=11.0",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
