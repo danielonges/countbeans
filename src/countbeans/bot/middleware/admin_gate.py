@@ -2,16 +2,13 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Bot
-from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message, TelegramObject
 
 from countbeans.bot.handlers._welcome import PROMOTE_REQUEST
+from countbeans.bot.utils.permissions import ADMIN_STATUSES, GROUP_TYPES
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
-
-_GROUP_TYPES = {"group", "supergroup"}
-_ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
 
 
 class AdminGateMiddleware(BaseMiddleware):
@@ -34,7 +31,7 @@ class AdminGateMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        if not isinstance(event, Message) or event.chat.type not in _GROUP_TYPES:
+        if not isinstance(event, Message) or event.chat.type not in GROUP_TYPES:
             return await handler(event, data)
 
         uow: UnitOfWork = data["uow"]
@@ -47,7 +44,7 @@ class AdminGateMiddleware(BaseMiddleware):
         if self._bot_id is None:
             self._bot_id = (await bot.me()).id
         member = await bot.get_chat_member(event.chat.id, self._bot_id)
-        is_admin = member.status in _ADMIN_STATUSES
+        is_admin = member.status in ADMIN_STATUSES
         await uow.groups.set_bot_admin(group.id, is_admin)
         if is_admin:
             return await handler(event, data)

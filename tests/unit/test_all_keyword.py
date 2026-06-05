@@ -20,14 +20,14 @@ def test_is_all_rejects_real_handles() -> None:
 
 
 # Family 2 — the bare `all` positional view selector (/balance all, /statements all).
-def test_is_all_selector_true_on_second_arg() -> None:
-    assert is_all_selector(["/balance", "all"])
-    assert is_all_selector(["/statements", "ALL"])
+# args is command.args.split() — the command token is already stripped by CommandObject.
+def test_is_all_selector_true_on_first_arg() -> None:
+    assert is_all_selector(["all"])
+    assert is_all_selector(["ALL"])
 
 
 def test_is_all_selector_false_without_selector() -> None:
-    assert not is_all_selector(["/balance"])  # bare command → personal view
-    assert not is_all_selector(["/statements", "me"])
-    assert not is_all_selector([])
-    # Only the first positional arg counts as the selector.
-    assert not is_all_selector(["/balance", "general", "all"])
+    assert not is_all_selector([])  # no args → personal view
+    assert not is_all_selector(["me"])
+    # Only the first arg counts; "all" buried later is not the selector.
+    assert not is_all_selector(["general", "all"])

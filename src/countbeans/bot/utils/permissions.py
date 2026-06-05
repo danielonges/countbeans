@@ -9,10 +9,11 @@ rather than being copy-pasted per handler.
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 
-_ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
+GROUP_TYPES = {"group", "supergroup"}
+ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
 
 
 async def is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     """True if the user is the group's creator or an administrator."""
     member = await bot.get_chat_member(chat_id, user_id)
-    return member.status in _ADMIN_STATUSES
+    return member.status in ADMIN_STATUSES

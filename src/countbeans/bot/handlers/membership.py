@@ -30,6 +30,7 @@ from aiogram.filters import (
 from aiogram.types import ChatMemberUpdated
 
 from countbeans.bot.handlers._welcome import GROUP_WELCOME, PROMOTE_REQUEST
+from countbeans.bot.utils.permissions import ADMIN_STATUSES, GROUP_TYPES
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.services.membership import record_member_leave, set_bot_admin
 from countbeans.services.onboard import onboard_member
@@ -39,11 +40,9 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-_GROUP_TYPES = {"group", "supergroup"}
-_ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
 # Statuses where the bot is still in the chat (vs. left/kicked). RESTRICTED is a
 # present-but-limited member; treat it as a non-admin member.
-_PRESENT_STATUSES = _ADMIN_STATUSES | {
+_PRESENT_STATUSES = ADMIN_STATUSES | {
     ChatMemberStatus.MEMBER,
     ChatMemberStatus.RESTRICTED,
 }
@@ -56,11 +55,11 @@ async def on_my_chat_member(
     """The bot's own membership changed. Maintain `groups.bot_is_admin` and guide
     the operator toward promoting the bot."""
     chat = event.chat
-    if chat.type not in _GROUP_TYPES:
+    if chat.type not in GROUP_TYPES:
         return
 
-    is_admin_now = event.new_chat_member.status in _ADMIN_STATUSES
-    was_admin = event.old_chat_member.status in _ADMIN_STATUSES
+    is_admin_now = event.new_chat_member.status in ADMIN_STATUSES
+    was_admin = event.old_chat_member.status in ADMIN_STATUSES
     present_now = event.new_chat_member.status in _PRESENT_STATUSES
     was_present = event.old_chat_member.status in _PRESENT_STATUSES
 

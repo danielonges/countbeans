@@ -24,11 +24,12 @@ def is_all(token: str) -> bool:
 
 
 def is_all_selector(args: Sequence[str]) -> bool:
-    """True if the command's first positional arg is the bare ``all`` selector.
+    """True if the first positional arg is the bare ``all`` selector.
 
-    Family 2 — /balance all, /statements all. ``args`` is the whitespace-split
-    message text, with the command itself at index 0."""
-    return len(args) > 1 and is_all(args[1])
+    Family 2 — /balance all, /statements all. ``args`` is ``command.args.split()``
+    (CommandObject already strips the command token, so the selector is at index 0,
+    not index 1)."""
+    return bool(args) and is_all(args[0])
 
 
 # Opening → closing quote characters accepted around a description. Covers the
