@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from countbeans.db._mixins import _now
 from countbeans.db.models import (
     Event,
     EventMember,
@@ -400,6 +401,19 @@ class GroupRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
+    async def get_by_telegram_chat_id(self, telegram_chat_id: int) -> Group | None:
+        """Read-only lookup by Telegram chat id — used by the admin gate, which
+        must read `bot_is_admin` without upserting."""
+        result = await self._session.execute(
+            select(Group).where(Group.telegram_chat_id == telegram_chat_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_bot_admin(self, group_id: uuid.UUID, bot_is_admin: bool) -> None:
+        await self._session.execute(
+            update(Group).where(Group.id == group_id).values(bot_is_admin=bot_is_admin)
+        )
+
     async def set_simplify_debts(
         self, group_id: uuid.UUID, simplify_debts: bool
     ) -> None:
@@ -465,6 +479,25 @@ class GroupMemberRepository:
             await self._session.flush()
             return True
         return False
+
+    async def mark_left(self, group_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """Set left_at on the user's active membership (left_at IS NULL), driven
+        by the chat_member leave stream. Returns True when a row was updated,
+        False when the user had no active membership."""
+        member = (
+            await self._session.execute(
+                select(GroupMember).where(
+                    GroupMember.group_id == group_id,
+                    GroupMember.user_id == user_id,
+                    GroupMember.left_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            return False
+        member.left_at = _now()
+        await self._session.flush()
+        return True
 
 
 class EventRepository:

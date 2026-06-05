@@ -53,6 +53,7 @@ def dispatcher() -> Dispatcher:
         event,
         group,
         join,
+        membership,
         settleup,
         simplify,
         start,
@@ -70,4 +71,5 @@ def dispatcher() -> Dispatcher:
         statements.router,
         event.router,
         group.router,
+        membership.router,
     )

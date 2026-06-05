@@ -14,12 +14,17 @@ from countbeans.bot.handlers import (
     event,
     group,
     join,
+    membership,
     settleup,
     simplify,
     start,
     statements,
 )
-from countbeans.bot.middleware import LoggingContextMiddleware, TransactionalMiddleware
+from countbeans.bot.middleware import (
+    AdminGateMiddleware,
+    LoggingContextMiddleware,
+    TransactionalMiddleware,
+)
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
 
@@ -63,8 +68,16 @@ async def run(token: str) -> None:
     # cover both update types — the callback handler issues reads too.
     dp.message.middleware(LoggingContextMiddleware())
     dp.callback_query.middleware(LoggingContextMiddleware())
+    # my_chat_member / chat_member updates also write (onboarding, bot-admin flag).
+    dp.my_chat_member.middleware(LoggingContextMiddleware())
+    dp.chat_member.middleware(LoggingContextMiddleware())
     dp.message.middleware(TransactionalMiddleware(uow_factory))
     dp.callback_query.middleware(TransactionalMiddleware(uow_factory))
+    dp.my_chat_member.middleware(TransactionalMiddleware(uow_factory))
+    dp.chat_member.middleware(TransactionalMiddleware(uow_factory))
+    # The admin gate runs after the UoW is opened (it reads/writes bot_is_admin)
+    # and only on messages — membership updates must always be processed.
+    dp.message.middleware(AdminGateMiddleware())
     dp.include_router(start.router)
     dp.include_router(join.router)
     dp.include_router(settleup.router)
@@ -75,6 +88,7 @@ async def run(token: str) -> None:
     dp.include_router(statements.router)
     dp.include_router(event.router)
     dp.include_router(group.router)
+    dp.include_router(membership.router)
 
     bot = Bot(token=token)
     try:
@@ -88,6 +102,9 @@ async def run(token: str) -> None:
             scope=BotCommandScopeAllPrivateChats(),
         )
         await bot.set_my_commands(_COMMANDS, scope=BotCommandScopeAllGroupChats())
-        await dp.start_polling(bot)
+        # chat_member is not delivered unless explicitly requested; resolving the
+        # used update types from the registered handlers opts us into both the
+        # my_chat_member and chat_member streams.
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await engine.dispose()

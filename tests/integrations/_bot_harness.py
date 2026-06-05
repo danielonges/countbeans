@@ -37,8 +37,11 @@ from aiogram.methods import (
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    ChatMemberAdministrator,
+    ChatMemberLeft,
     ChatMemberMember,
     ChatMemberOwner,
+    ChatMemberUpdated,
     Message,
     Update,
     User,
@@ -63,10 +66,20 @@ class MockedBot(Bot):
     a test can assert on reply text.
     """
 
-    def __init__(self, *, caller_is_admin: bool = False, member_count: int = 2) -> None:
+    def __init__(
+        self,
+        *,
+        caller_is_admin: bool = False,
+        member_count: int = 2,
+        bot_is_admin: bool = True,
+    ) -> None:
         super().__init__(token=_BOT_TOKEN, default=DefaultBotProperties())
         self.caller_is_admin = caller_is_admin
         self.member_count = member_count
+        # The bot's *own* admin status, reported by get_chat_member for _BOT_ID —
+        # what AdminGateMiddleware's self-heal reads. Defaults True so handler
+        # tests aren't gated unless they opt in.
+        self.bot_is_admin = bot_is_admin
         self.sent: list[SendMessage] = []
         self.edits: list[EditMessageText] = []
         self.answers: list[AnswerCallbackQuery] = []
@@ -80,6 +93,11 @@ class MockedBot(Bot):
                 username="countbeans_bot",
             )
         if isinstance(method, GetChatMember):
+            if method.user_id == _BOT_ID:
+                bot_user = User(id=_BOT_ID, is_bot=True, first_name="countbeans")
+                if self.bot_is_admin:
+                    return _admin_member(bot_user)
+                return ChatMemberMember(user=bot_user)
             user = User(id=method.user_id, is_bot=False, first_name="Caller")
             if self.caller_is_admin:
                 return ChatMemberOwner(user=user, is_anonymous=False)
@@ -224,3 +242,83 @@ async def feed_callback(
     """Send one callback-query update (an inline-button tap) through the dispatcher."""
     extra = {"uow": HarnessUoW(session)} if session is not None else {}
     await dp.feed_update(bot, Update(update_id=2, callback_query=callback), **extra)
+
+
+def _admin_member(user: User) -> ChatMemberAdministrator:
+    """An `administrator` ChatMember with all granular rights off — enough to
+    exercise the admin-status check (status == administrator)."""
+    return ChatMemberAdministrator(
+        user=user,
+        can_be_edited=False,
+        is_anonymous=False,
+        can_manage_chat=True,
+        can_delete_messages=False,
+        can_manage_video_chats=False,
+        can_restrict_members=False,
+        can_promote_members=False,
+        can_change_info=False,
+        can_invite_users=False,
+        can_post_stories=False,
+        can_edit_stories=False,
+        can_delete_stories=False,
+    )
+
+
+# The three ChatMember states the membership handlers care about, by keyword.
+_STATE_BUILDERS = {
+    "left": lambda u: ChatMemberLeft(user=u),
+    "member": lambda u: ChatMemberMember(user=u),
+    "administrator": _admin_member,
+}
+
+
+def make_chat_member_updated(
+    *,
+    old: str,
+    new: str,
+    target_id: int = _BOT_ID,
+    username: str | None = None,
+    first_name: str = "Member",
+    is_bot: bool | None = None,
+    actor_id: int = 1001,
+    chat_id: int = DEFAULT_CHAT_ID,
+    chat_type: str = "supergroup",
+) -> ChatMemberUpdated:
+    """Build a ChatMemberUpdated for either my_chat_member (target is the bot,
+    `target_id=_BOT_ID`) or chat_member (target is another user). `old`/`new` are
+    one of 'left', 'member', 'administrator'."""
+    target = User(
+        id=target_id,
+        is_bot=is_bot if is_bot is not None else target_id == _BOT_ID,
+        first_name=first_name,
+        username=username,
+    )
+    return ChatMemberUpdated(
+        chat=Chat(id=chat_id, type=chat_type, title="Test Group"),
+        from_user=User(id=actor_id, is_bot=False, first_name="Actor"),
+        date=datetime.now(timezone.utc),
+        old_chat_member=_STATE_BUILDERS[old](target),
+        new_chat_member=_STATE_BUILDERS[new](target),
+    )
+
+
+async def feed_my_chat_member(
+    dp: Dispatcher,
+    bot: MockedBot,
+    event: ChatMemberUpdated,
+    *,
+    session: AsyncSession | None = None,
+) -> None:
+    extra = {"uow": HarnessUoW(session)} if session is not None else {}
+    await dp.feed_update(bot, Update(update_id=3, my_chat_member=event), **extra)
+
+
+async def feed_chat_member(
+    dp: Dispatcher,
+    bot: MockedBot,
+    event: ChatMemberUpdated,
+    *,
+    session: AsyncSession | None = None,
+) -> None:
+    extra = {"uow": HarnessUoW(session)} if session is not None else {}
+    await dp.feed_update(bot, Update(update_id=4, chat_member=event), **extra)

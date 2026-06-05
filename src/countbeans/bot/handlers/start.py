@@ -15,6 +15,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.handlers._welcome import GROUP_WELCOME
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.services.onboard import onboard_member
@@ -23,23 +24,6 @@ from countbeans.services.uow import UnitOfWork
 logger = logging.getLogger(__name__)
 
 router = Router()
-
-_GROUP_WELCOME = (
-    "👋 Hi! I'm countbeans — I track shared expenses for this group so nobody "
-    "has to do the mental math.\n"
-    "\n"
-    "Commands:\n"
-    '• /addexpense <amount> "<desc>" [@user …] — record an expense\n'
-    "• /balance [all] — your net position, or every member's with /balance all\n"
-    "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
-    "• /statements [all] — your transactions, or the whole group's with /statements all\n"
-    "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
-    "• /currency [CODE] — view or (admins) set the group's default currency\n"
-    "• /group — group info, members, and activity\n"
-    "\n"
-    "You're all set — I've added you to this group's ledger.\n"
-    "Everyone else: run /join to be added too."
-)
 
 _NOT_ADMIN = (
     "Only group admins can run /start. "
@@ -77,7 +61,7 @@ async def start_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         ),
     )
 
-    await message.answer(_GROUP_WELCOME)
+    await message.answer(GROUP_WELCOME)
     logger.info(
         "Onboarded admin user=%s into group=%s via /start",
         message.from_user.id,

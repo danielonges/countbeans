@@ -54,6 +54,11 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(3), nullable=False, default="SGD"
     )
     simplify_debts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Whether the bot itself is an administrator of this group. Maintained from
+    # the my_chat_member stream and self-healed by a getChatMember(bot) check on
+    # the false path (see AdminGateMiddleware). The bot refuses to process group
+    # commands until this is true (CLAUDE.md "Onboarding & membership").
+    bot_is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Active event for "active-event mode" (see CLAUDE.md "Events"): when non-NULL
     # it points at the group's single OPEN event and /addexpense & /settleup
     # auto-tag to it; NULL = general tracking (no open event, or the open event is
