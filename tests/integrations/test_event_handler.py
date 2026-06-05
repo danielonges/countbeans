@@ -47,7 +47,7 @@ async def test_event_info_paused_state(dispatcher, session: AsyncSession) -> Non
         session, group, telegram_user_id=1001, username="creator"
     )
     await seed_event(session, group, creator=creator, name="Trip")
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
 
     await feed(
         dispatcher, bot, make_message("/event pause", from_id=1001), session=session
@@ -67,11 +67,43 @@ async def test_event_info_no_open_event(dispatcher, session: AsyncSession) -> No
     assert "No event is open" in (bot.last_reply or "")
 
 
+async def test_event_management_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Managing an event is admin-only (mirrors /simplify, /currency): a non-admin
+    is refused and no event is created — none of the shared state is touched."""
+    await seed_group(session)
+    bot = MockedBot(caller_is_admin=False)
+    await feed(
+        dispatcher,
+        bot,
+        make_message('/event new "Trip"', from_id=1001, username="member"),
+        session=session,
+    )
+    assert "admins" in (bot.last_reply or "").lower()
+    assert (await read_group(session)).active_event_id is None
+
+
+async def test_event_info_open_to_non_admin(dispatcher, session: AsyncSession) -> None:
+    """Viewing an event stays open to any member, even one the bot reports as a
+    non-admin — only the mutating subcommands are gated."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=False)
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=2002), session=session
+    )
+    assert "Trip" in (bot.last_reply or "")
+
+
 async def test_event_new_with_currency_stores_and_echoes(
     dispatcher, session: AsyncSession
 ) -> None:
     await seed_group(session)
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
     await feed(
         dispatcher,
         bot,
@@ -93,7 +125,7 @@ async def test_event_new_unquoted_name_with_currency(
     """Unquoted `/event new Bali IDR` — the trailing 3-letter token is the
     currency, not part of the name."""
     await seed_group(session)
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
     await feed(
         dispatcher,
         bot,
@@ -169,7 +201,7 @@ async def test_settleup_uses_event_default_currency(
 
 async def test_event_new_sets_active(dispatcher, session: AsyncSession) -> None:
     await seed_group(session)
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
     await feed(
         dispatcher,
         bot,
@@ -190,7 +222,7 @@ async def test_event_new_rejected_when_one_open(
     )
     first = await seed_event(session, group, creator=creator, name="One")
 
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
     await feed(
         dispatcher,
         bot,
@@ -208,7 +240,7 @@ async def test_event_pause_resume_close_flow(dispatcher, session: AsyncSession) 
         session, group, telegram_user_id=1001, username="creator"
     )
     ev = await seed_event(session, group, creator=creator, name="Trip")
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
 
     await feed(
         dispatcher, bot, make_message("/event pause", from_id=1001), session=session
@@ -237,7 +269,7 @@ async def test_event_add_remove_roster(dispatcher, session: AsyncSession) -> Non
         session, group, telegram_user_id=1001, username="creator"
     )
     ev = await seed_event(session, group, creator=creator, name="Trip")
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
 
     await feed(
         dispatcher, bot, make_message("/event add @bob", from_id=1001), session=session
@@ -268,7 +300,7 @@ async def test_event_add_all_folds_group_onto_roster(
     await seed_member(session, group, telegram_user_id=1003, username="carol")
     # Event starts with only the creator on the roster (a deliberate subset).
     ev = await seed_event(session, group, creator=creator, name="Trip")
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
 
     await feed(
         dispatcher,
@@ -296,7 +328,7 @@ async def test_event_remove_all_refused(dispatcher, session: AsyncSession) -> No
         session, group, telegram_user_id=1001, username="creator"
     )
     await seed_event(session, group, creator=creator, name="Trip")
-    bot = MockedBot()
+    bot = MockedBot(caller_is_admin=True)
 
     await feed(
         dispatcher,
@@ -337,7 +369,7 @@ async def test_event_all_splits_roster_without_coverage_warning(
     )
     ev = await seed_event(session, group, creator=creator, name="Trip")
     # Roster = {creator, bob}; the chat claims many more members.
-    bot = MockedBot(member_count=10)
+    bot = MockedBot(member_count=10, caller_is_admin=True)
     await feed(
         dispatcher, bot, make_message("/event add @bob", from_id=1001), session=session
     )

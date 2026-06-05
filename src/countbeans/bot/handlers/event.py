@@ -1,13 +1,17 @@
 """Bot handler for /event — manage ad-hoc event scopes within a group.
 
-Subcommands (any member may run these):
-  /event new "<name>"    start an event (one open at a time); new /addexpense &
-                         /settleup auto-tag to it until paused or closed
-  /event pause           stop auto-tagging (log a general expense); stays open
-  /event resume          resume auto-tagging to the open event
-  /event close           finish the open event, freeing the slot
-  /event add @user       add someone to the event roster (@all adds the whole group)
-  /event remove @user    remove someone from the roster
+Managing an event — new/pause/resume/close/add/remove — is **admin-only** (like
+/simplify and /currency): it changes how *subsequent* expenses split for the
+whole group, so it isn't a single member's call. Viewing (info, or bare /event)
+is open to any member.
+  /event new "<name>"    (admin) start an event (one open at a time); new
+                         /addexpense & /settleup auto-tag to it until paused/closed
+  /event pause           (admin) stop auto-tagging (log a general expense); stays open
+  /event resume          (admin) resume auto-tagging to the open event
+  /event close           (admin) finish the open event, freeing the slot
+  /event add @user       (admin) add someone to the roster (@all adds the whole group)
+  /event remove @user    (admin) remove someone from the roster
+  /event info            show the open event's status, roster, and outstanding balance
   /event                 show the active event + usage
 
 Scope is durable, shared group state (`groups.active_event_id`), not aiogram FSM
@@ -18,12 +22,13 @@ import logging
 import re
 import uuid
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import extract_quoted_description, is_all
+from countbeans.bot.utils.permissions import is_admin
 from countbeans.db.models import Group
 from countbeans.dto.commands import (
     CreateEventCommand,
@@ -56,8 +61,14 @@ _USAGE = (
     "• /event resume — resume tagging to the open event\n"
     "• /event close — finish the open event\n"
     "• /event add @user / remove @user — edit the roster\n"
-    "Inside an event, @all (or no mentions) splits the roster, not the whole group."
+    "Inside an event, @all (or no mentions) splits the roster, not the whole group.\n"
+    "Managing an event is admin-only; anyone can view it."
 )
+
+# Subcommands that change shared event state — and thus how later expenses split
+# for the whole group — are admin-gated. Reads (info, the bare-status fallback)
+# stay open to any member.
+_MUTATING_SUBCOMMANDS = frozenset({"new", "pause", "resume", "close", "add", "remove"})
 
 
 def _roster_str(members: list[MemberInfo]) -> str:
@@ -67,8 +78,26 @@ def _roster_str(members: list[MemberInfo]) -> str:
 
 
 @router.message(Command("event"))
-async def cmd_event(message: Message, command: CommandObject, uow: UnitOfWork) -> None:
+async def cmd_event(
+    message: Message, command: CommandObject, uow: UnitOfWork, bot: Bot
+) -> None:
     if message.from_user is None:
+        return
+
+    tokens = (command.args or "").split(maxsplit=1)
+    sub = tokens[0].lower() if tokens else ""
+    rest = tokens[1] if len(tokens) > 1 else ""
+
+    # Managing an event is admin-only (mirrors /simplify, /currency): it changes
+    # how subsequent expenses split for the whole group, so refuse non-admins
+    # before any state is touched. Reads (info, bare status) fall through.
+    if sub in _MUTATING_SUBCOMMANDS and not await is_admin(
+        bot, message.chat.id, message.from_user.id
+    ):
+        await message.reply(
+            "Only group admins can manage events (start, pause, resume, close, or "
+            "edit the roster). Anyone can view the current event with /event info."
+        )
         return
 
     caller = await uow.users.upsert(
@@ -82,10 +111,6 @@ async def cmd_event(message: Message, command: CommandObject, uow: UnitOfWork) -
         group_name=getattr(message.chat, "title", None),
     )
     await uow.group_members.ensure_member(group.id, caller.id)
-
-    tokens = (command.args or "").split(maxsplit=1)
-    sub = tokens[0].lower() if tokens else ""
-    rest = tokens[1] if len(tokens) > 1 else ""
 
     if sub == "new":
         await _new(message, uow, group, caller.id, rest)
