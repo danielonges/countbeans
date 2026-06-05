@@ -32,6 +32,7 @@ from countbeans.dto.commands import (
     SetEventStatusCommand,
 )
 from countbeans.dto.domain import MemberInfo
+from countbeans.services.balance import compute_balances
 from countbeans.services.events import (
     add_group_to_roster,
     close_event,
@@ -49,7 +50,8 @@ _MENTION_RE = re.compile(r"@([\w.]+)")
 
 _USAGE = (
     "Manage an event scope:\n"
-    '• /event new "<name>" — start an event (new expenses tag to it)\n'
+    '• /event new "<name>" [CUR] — start an event (new expenses tag to it)\n'
+    "• /event info — show the open event's status, roster, and outstanding balance\n"
     "• /event pause — log a general expense without ending the event\n"
     "• /event resume — resume tagging to the open event\n"
     "• /event close — finish the open event\n"
@@ -95,6 +97,8 @@ async def cmd_event(message: Message, command: CommandObject, uow: UnitOfWork) -
         await _close(message, uow, group)
     elif sub in ("add", "remove"):
         await _roster(message, uow, group, sub, rest)
+    elif sub == "info":
+        await _info(message, uow, group)
     else:
         await _status(message, uow, group)
 
@@ -103,22 +107,39 @@ async def _new(
     message: Message, uow: UnitOfWork, group: Group, caller_id: uuid.UUID, rest: str
 ) -> None:
     # Name may be quoted (handles @ or spaces) or the bare remaining text.
-    name, _ = extract_quoted_description(rest)
+    # An optional 3-letter ISO 4217 code after a quoted name sets the event currency.
+    name, after_name = extract_quoted_description(rest)
     if name is None:
         name = rest.strip()
+        after_name = ""
     if not name:
-        await message.reply('Usage: /event new "<name>"')
+        await message.reply('Usage: /event new "<name>" [CUR]')
         return
+
+    currency: str | None = None
+    if after_name:
+        token = after_name.strip().upper()
+        if len(token) == 3 and token.isalpha():
+            currency = token
+
     try:
         result = await create_event(
-            uow, CreateEventCommand(group_id=group.id, name=name, created_by=caller_id)
+            uow,
+            CreateEventCommand(
+                group_id=group.id,
+                name=name,
+                created_by=caller_id,
+                default_currency=currency,
+            ),
         )
     except ValueError as exc:
         await message.reply(str(exc))
         return
+
+    currency_note = f" [{result.currency}]" if result.currency else ""
     await message.reply(
-        f'✅ Started event "{result.name}". New expenses and settlements tag to it '
-        "until /event pause or /event close."
+        f'✅ Started event "{result.name}"{currency_note}. New expenses and settlements '
+        "tag to it until /event pause or /event close."
     )
     logger.info("Event opened: event_id=%s group_id=%s", result.event_id, group.id)
 
@@ -240,19 +261,62 @@ async def _roster(
     await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
 
 
+async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
+    open_event = (
+        await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
+    if open_event is None:
+        open_event = await uow.events.get_open(group.id)
+    if open_event is None:
+        await message.reply('No event is open. Start one with /event new "<name>".')
+        return
+
+    is_active = group.active_event_id == open_event.id
+    state = "active" if is_active else "paused"
+    cur = f" [{open_event.default_currency}]" if open_event.default_currency else ""
+    roster = await uow.events.list_members(open_event.id)
+
+    balances = await compute_balances(uow, group.id, event_id=open_event.id)
+    outstanding: dict[str, int] = {}
+    for key, cents in balances.items():
+        if cents > 0:
+            outstanding[key.currency] = outstanding.get(key.currency, 0) + cents
+
+    lines = [f'Event: "{open_event.name}"{cur} — {state}']
+    lines.append(f"Roster: {_roster_str(roster)}")
+    if outstanding:
+        parts = [f"{c} {v // 100}.{v % 100:02d}" for c, v in outstanding.items()]
+        lines.append(f"Outstanding: {', '.join(parts)}")
+    else:
+        lines.append("All settled up.")
+    hints = (
+        "/event resume • /event close"
+        if not is_active
+        else "/event pause • /event close"
+    )
+    lines.append(hints)
+    await message.reply("\n".join(lines))
+
+
 async def _status(message: Message, uow: UnitOfWork, group: Group) -> None:
     lines = [_USAGE]
     if group.active_event_id is not None:
         active = await uow.events.get(group.active_event_id)
         if active is not None:
             roster = await uow.events.list_members(active.id)
+            cur = f" [{active.default_currency}]" if active.default_currency else ""
             lines.append(
-                f'\nActive event: "{active.name}" — roster: {_roster_str(roster)}'
+                f'\nActive event: "{active.name}"{cur} — roster: {_roster_str(roster)}'
             )
     else:
         open_event = await uow.events.get_open(group.id)
         if open_event is not None:
+            cur = (
+                f" [{open_event.default_currency}]"
+                if open_event.default_currency
+                else ""
+            )
             lines.append(
-                f'\nOpen but paused: "{open_event.name}" (/event resume to continue).'
+                f'\nOpen but paused: "{open_event.name}"{cur} (/event resume to continue).'
             )
     await message.reply("\n".join(lines))

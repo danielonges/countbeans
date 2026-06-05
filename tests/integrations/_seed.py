@@ -65,12 +65,18 @@ async def seed_event(
     *,
     creator: User,
     name: str = "Trip",
+    default_currency: str | None = None,
 ) -> EventCreatedResult:
     """Open an event via the real service (sets the active pointer, adds the
     creator to the roster). Returns the EventCreatedResult (has .event_id)."""
     result = await create_event(
         HarnessUoW(session),
-        CreateEventCommand(group_id=group.id, name=name, created_by=creator.id),
+        CreateEventCommand(
+            group_id=group.id,
+            name=name,
+            created_by=creator.id,
+            default_currency=default_currency,
+        ),
     )
     await session.flush()
     return result

@@ -87,13 +87,14 @@ async def cmd_settleup(
     )
     event_id = active.id if active else None
     scope_note = f' in "{active.name}"' if active else ""
+    currency = (active.default_currency if active else None) or group.default_currency
 
     # Two handles → admin records a settlement for a pair (e.g. a departed
     # member). Tried before the single-handle form, which it would also match.
     pair = _PAIR_ARGS_RE.match(args)
     if pair:
         await _settle_on_behalf(
-            message, bot, uow, group, event_id, scope_note, *pair.groups()
+            message, bot, uow, group, event_id, scope_note, currency, *pair.groups()
         )
         return
 
@@ -129,7 +130,6 @@ async def cmd_settleup(
         )
         return
 
-    currency = group.default_currency
     amount_cents = await _resolve_amount(
         message,
         uow,
@@ -182,6 +182,7 @@ async def _settle_on_behalf(
     group: Group,
     event_id: uuid.UUID | None,
     scope_note: str,
+    currency: str,
     from_handle: str,
     to_handle: str,
     amount_str: str | None,
@@ -226,7 +227,6 @@ async def _settle_on_behalf(
         await message.reply("The payer and recipient must be different people.")
         return
 
-    currency = group.default_currency
     amount_cents = await _resolve_amount(
         message,
         uow,

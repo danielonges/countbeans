@@ -33,6 +33,43 @@ from ._bot_harness import HarnessUoW
 from ._seed import read_group, seed_event, seed_expense, seed_group, seed_member
 
 
+async def test_create_event_stores_default_currency(session: AsyncSession) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    result = await create_event(
+        HarnessUoW(session),
+        CreateEventCommand(
+            group_id=group.id,
+            name="Bali",
+            created_by=creator.id,
+            default_currency="IDR",
+        ),
+    )
+    await session.flush()
+
+    assert result.currency == "IDR"
+    ev = await EventRepository(session).get(result.event_id)
+    assert ev is not None and ev.default_currency == "IDR"
+
+
+async def test_create_event_no_currency_stores_null(session: AsyncSession) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    result = await create_event(
+        HarnessUoW(session),
+        CreateEventCommand(group_id=group.id, name="Trip", created_by=creator.id),
+    )
+    await session.flush()
+
+    assert result.currency is None
+    ev = await EventRepository(session).get(result.event_id)
+    assert ev is not None and ev.default_currency is None
+
+
 async def test_create_event_sets_active_pointer_and_roster(
     session: AsyncSession,
 ) -> None:

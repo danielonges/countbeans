@@ -10,6 +10,139 @@ from ._bot_harness import MockedBot, feed, make_message
 from ._seed import read_group, seed_event, seed_expense, seed_group, seed_member
 
 
+async def test_event_info_shows_status_roster_outstanding(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    ev = await seed_event(
+        session, group, creator=caller, name="Trip", default_currency="IDR"
+    )
+    await seed_expense(
+        session,
+        group,
+        payer=caller,
+        participants=[caller, bob],
+        amount_cents=200000,
+        currency="IDR",
+        event_id=ev.event_id,
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    reply = bot.last_reply or ""
+    assert "Trip" in reply
+    assert "[IDR]" in reply
+    assert "active" in reply
+    assert "caller" in reply  # roster
+    assert "IDR 1000.00" in reply  # bob owes caller half of 2000.00
+
+
+async def test_event_info_paused_state(dispatcher, session: AsyncSession) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot()
+
+    await feed(
+        dispatcher, bot, make_message("/event pause", from_id=1001), session=session
+    )
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    assert "paused" in (bot.last_reply or "")
+
+
+async def test_event_info_no_open_event(dispatcher, session: AsyncSession) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    assert "No event is open" in (bot.last_reply or "")
+
+
+async def test_event_new_with_currency_stores_and_echoes(
+    dispatcher, session: AsyncSession
+) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message('/event new "Bali Trip" IDR', from_id=1001, username="creator"),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert "Started event" in reply
+    assert "[IDR]" in reply
+    group = await read_group(session)
+    assert group.active_event_id is not None
+    ev = await EventRepository(session).get(group.active_event_id)
+    assert ev is not None and ev.default_currency == "IDR"
+
+
+async def test_addexpense_uses_event_default_currency(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(
+        session, group, creator=creator, name="Bali", default_currency="IDR"
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 30000 "Lunch" @bob', from_id=1001, username="creator"
+        ),
+        session=session,
+    )
+    assert 'Added to "Bali"' in (bot.last_reply or "")
+    expense = (await session.execute(select(Expense))).scalar_one()
+    assert expense.currency == "IDR"
+
+
+async def test_settleup_uses_event_default_currency(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    ev = await seed_event(
+        session, group, creator=caller, name="Bali", default_currency="IDR"
+    )
+    await seed_expense(
+        session,
+        group,
+        payer=bob,
+        participants=[caller, bob],
+        amount_cents=200000,
+        currency="IDR",
+        event_id=ev.event_id,
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob", from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "Settled up" in (bot.last_reply or "")
+    settlement = (await session.execute(select(Settlement))).scalar_one()
+    assert settlement.currency == "IDR"
+
+
 async def test_event_new_sets_active(dispatcher, session: AsyncSession) -> None:
     await seed_group(session)
     bot = MockedBot()

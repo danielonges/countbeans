@@ -82,11 +82,14 @@ async def cmd_addexpense(
     )
     event_id = active.id if active else None
 
-    # The amount token may carry a currency marker ($50, €50, USD50); resolve it
-    # against the group default. Mixed currencies are fine — balances derive
-    # per-currency (see CLAUDE.md "Deriving balances").
+    # The amount token may carry a currency marker ($50, €50, USD50); fall back to
+    # the active event's currency, then the group default. Mixed currencies are fine
+    # — balances derive per-currency (see CLAUDE.md "Deriving balances").
+    scope_currency = (
+        active.default_currency if active else None
+    ) or group.default_currency
     try:
-        currency, amount_cents = parse_money(tokens[0], group.default_currency)
+        currency, amount_cents = parse_money(tokens[0], scope_currency)
     except ValueError:
         await message.reply("Invalid amount. Use a positive number like 25.50")
         return
