@@ -9,10 +9,12 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         env_prefix="COUNTBEANS_",
+        # Tolerate unknown COUNTBEANS_* vars so a leftover entry in an existing
+        # .env or deploy environment (e.g. the removed API_ID/API_HASH) doesn't
+        # crash startup.
+        extra="ignore",
     )
 
-    api_id: int
-    api_hash: SecretStr
     bot_token: SecretStr
     database_url: PostgresDsn
     log_level: str = "INFO"
