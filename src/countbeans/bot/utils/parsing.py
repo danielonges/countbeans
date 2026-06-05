@@ -104,6 +104,14 @@ _SYMBOL_TO_CODE = {
     "₩": "KRW",
 }
 
+# Upper bound on a single parsed amount, in cents. Amounts are stored as BIGINT
+# (max ~9.2e18), and `_AMOUNT_BODY` permits an unbounded integer part, so without
+# a cap a 20-digit token would overflow the column on INSERT and surface as an
+# unhandled DB error instead of a clean rejection. 10**15 cents (ten trillion
+# major units) dwarfs any real expense yet leaves ample BIGINT headroom, so no
+# row can overflow.
+MAX_AMOUNT_CENTS = 10**15
+
 _AMOUNT_BODY = r"\d+(?:\.\d{1,2})?"
 
 # An amount token with an OPTIONAL leading currency marker — either a symbol or a
@@ -150,7 +158,8 @@ def parse_amount_cents(s: str) -> int:
     Float arithmetic accumulates rounding error across a ledger, so amounts are
     parsed straight from the string into integer minor units (see CLAUDE.md
     "Design principles"). Callers gate input with their own amount regex first;
-    this raises ``ValueError`` on a non-positive result.
+    this raises ``ValueError`` on a non-positive result or one exceeding
+    ``MAX_AMOUNT_CENTS`` (which would otherwise overflow the BIGINT column).
     """
     if "." in s:
         integer_part, decimal_part = s.split(".", 1)
@@ -160,4 +169,6 @@ def parse_amount_cents(s: str) -> int:
     cents = int(integer_part) * 100 + int(decimal_part)
     if cents <= 0:
         raise ValueError("amount must be positive")
+    if cents > MAX_AMOUNT_CENTS:
+        raise ValueError("amount is too large")
     return cents

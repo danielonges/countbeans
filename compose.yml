@@ -1,5 +1,9 @@
-# Shared so the bot and the one-off migrate step never drift apart.
-x-database-url: &database-url postgresql+asyncpg://countbeans:countbeans@db:5432/countbeans
+# Shared so the bot and the one-off migrate step never drift apart. Credentials
+# default to the dev values but can be OVERRIDDEN via the environment (or .env)
+# for a real deployment — keep production secrets out of this committed file
+# (see .env.example). The bot only reads the assembled DSN; pydantic-settings
+# doesn't care where the value originates.
+x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-countbeans}:${POSTGRES_PASSWORD:-countbeans}@db:5432/${POSTGRES_DB:-countbeans}
 
 x-app: &app
   build: .
@@ -13,13 +17,13 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: countbeans
-      POSTGRES_USER: countbeans
-      POSTGRES_PASSWORD: countbeans
+      POSTGRES_DB: ${POSTGRES_DB:-countbeans}
+      POSTGRES_USER: ${POSTGRES_USER:-countbeans}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-countbeans}
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U countbeans"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-countbeans}"]
       interval: 5s
       timeout: 5s
       retries: 5

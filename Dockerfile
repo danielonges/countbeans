@@ -22,4 +22,19 @@ RUN uv sync --frozen --no-dev
 # Ship migrations so the container can run `alembic upgrade head` on deploy
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
-CMD ["uv", "run", "countbeans"]
+
+# Run as an unprivileged user — the bot is a long-lived network client and has no
+# reason to run as root. `uv run` keeps its existing behavior (so the compose
+# `migrate` and dev `watchfiles` overrides still work); we only relocate uv's
+# cache to a writable path and hand /app to the new owner so any runtime sync
+# can still write the venv.
+ENV UV_CACHE_DIR=/tmp/uv-cache
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+# `--frozen --no-dev` keeps the prod runtime lean and offline: the image is
+# already fully synced at build time, so this is a no-op sync (no network at
+# boot) and the dev toolchain (pyright/pytest/...) never lands in the production
+# container. The compose `migrate` and dev `watchfiles` services override this
+# command, so their own sync behavior is unaffected.
+CMD ["uv", "run", "--frozen", "--no-dev", "countbeans"]

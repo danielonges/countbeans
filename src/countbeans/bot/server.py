@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
@@ -90,7 +91,13 @@ async def run(token: str) -> None:
     dp.include_router(group.router)
     dp.include_router(membership.router)
 
-    bot = Bot(token=token)
+    # Every handler replies in PLAIN TEXT: user-controlled strings (expense
+    # descriptions, event names, @handles) are echoed back verbatim and escaped
+    # nowhere. Pin parse_mode to None at the composition root so a future default
+    # can't silently turn those echoes into a Markdown/HTML injection vector. If
+    # formatting is ever enabled, every echoed user string must first be escaped
+    # (html.escape / aiogram's quote helpers).
+    bot = Bot(token=token, default=DefaultBotProperties(parse_mode=None))
     try:
         await bot.set_my_commands(
             [

@@ -25,7 +25,13 @@ class LoggingContextMiddleware(BaseMiddleware):
         if isinstance(event, Message) and event.from_user:
             fields["user_id"] = event.from_user.id
             fields["chat_id"] = event.chat.id
-            fields["command"] = (event.text or "")[:80]
+            # Log only the command NAME, never its arguments — the full text
+            # carries user financial data (amounts, descriptions, @handles).
+            # Strip the "@botname" suffix Telegram appends in groups. Non-command
+            # messages leave "command" unset.
+            head = (event.text or "").split(maxsplit=1)
+            if head and head[0].startswith("/"):
+                fields["command"] = head[0].split("@", 1)[0]
         elif isinstance(event, CallbackQuery) and event.from_user:
             fields["user_id"] = event.from_user.id
             fields["chat_id"] = event.message.chat.id if event.message else None
