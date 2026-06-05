@@ -9,7 +9,7 @@ presentational (see CLAUDE.md "Debt simplification").
 import logging
 
 from aiogram import Bot, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.permissions import is_admin
@@ -25,7 +25,9 @@ def _state(on: bool) -> str:
 
 
 @router.message(Command("simplify"))
-async def cmd_simplify(message: Message, bot: Bot, uow: UnitOfWork) -> None:
+async def cmd_simplify(
+    message: Message, command: CommandObject, bot: Bot, uow: UnitOfWork
+) -> None:
     if message.from_user is None:
         return
 
@@ -34,8 +36,8 @@ async def cmd_simplify(message: Message, bot: Bot, uow: UnitOfWork) -> None:
         group_name=getattr(message.chat, "title", None),
     )
 
-    parts = (message.text or "").split()
-    arg = parts[1].lower() if len(parts) > 1 else None
+    args = (command.args or "").split()
+    arg = args[0].lower() if args else None
 
     # No argument → report the current state (any member may read).
     if arg is None:

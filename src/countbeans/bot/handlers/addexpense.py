@@ -15,7 +15,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import (
     extract_quoted_description,
     is_all,
@@ -42,10 +42,6 @@ _USAGE = (
     '"she said \\"hi\\"".\n'
     "• Prefix the amount with a currency to override the default: $50, €50, USD50."
 )
-
-
-def _money(cents: int, currency: str) -> str:
-    return f"{currency} {cents // 100}.{cents % 100:02d}"
 
 
 @router.message(Command("addexpense"))
@@ -136,15 +132,15 @@ async def cmd_addexpense(
     # mis-file an expense (CLAUDE.md "Events"). General tracking keeps its wording.
     if active is not None:
         head = (
-            f'✅ Added to "{active.name}": {description} — {_money(result.amount_cents, result.currency)}'
+            f'✅ Added to "{active.name}": {description} — {format_money(result.amount_cents, result.currency)}'
             if description
-            else f'✅ Added to "{active.name}" — {_money(result.amount_cents, result.currency)}'
+            else f'✅ Added to "{active.name}" — {format_money(result.amount_cents, result.currency)}'
         )
     else:
         head = (
-            f"Added expense: {description} — {_money(result.amount_cents, result.currency)}"
+            f"Added expense: {description} — {format_money(result.amount_cents, result.currency)}"
             if description
-            else f"Added expense — {_money(result.amount_cents, result.currency)}"
+            else f"Added expense — {format_money(result.amount_cents, result.currency)}"
         )
     lines = [
         head,
@@ -154,7 +150,7 @@ async def cmd_addexpense(
     ]
     for p in participants:
         lines.append(
-            f"  {display_name(p.username, p.first_name)}: {_money(result.shares.get(p.user_id, 0), result.currency)}"
+            f"  {display_name(p.username, p.first_name)}: {format_money(result.shares.get(p.user_id, 0), result.currency)}"
         )
 
     # When splitting the whole group, warn if the bot can't see everyone — it can

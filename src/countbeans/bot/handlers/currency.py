@@ -14,7 +14,7 @@ currencies).
 import logging
 
 from aiogram import Bot, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.permissions import is_admin
@@ -26,7 +26,9 @@ router = Router()
 
 
 @router.message(Command("currency"))
-async def cmd_currency(message: Message, bot: Bot, uow: UnitOfWork) -> None:
+async def cmd_currency(
+    message: Message, command: CommandObject, bot: Bot, uow: UnitOfWork
+) -> None:
     if message.from_user is None:
         return
 
@@ -35,8 +37,8 @@ async def cmd_currency(message: Message, bot: Bot, uow: UnitOfWork) -> None:
         group_name=getattr(message.chat, "title", None),
     )
 
-    parts = (message.text or "").split()
-    arg = parts[1].upper() if len(parts) > 1 else None
+    args = (command.args or "").split()
+    arg = args[0].upper() if args else None
 
     # No argument → report the current default (any member may read).
     if arg is None:

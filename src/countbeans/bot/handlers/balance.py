@@ -4,11 +4,11 @@ import logging
 import uuid
 
 from aiogram import Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.utils.formatting import display_name
-from countbeans.bot.utils.parsing import is_all_selector
+from countbeans.bot.utils.formatting import display_name, format_money
+from countbeans.bot.utils.parsing import is_all
 from countbeans.services.balance import get_group_summary
 from countbeans.services.uow import UnitOfWork
 
@@ -23,12 +23,10 @@ def _fmt(cents: int, currency: str) -> str:
     return f"{sign}{currency} {abs_cents // 100}.{abs_cents % 100:02d}"
 
 
-def _amount(cents: int, currency: str) -> str:
-    return f"{currency} {cents // 100}.{cents % 100:02d}"
-
-
 @router.message(Command("balance"))
-async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
+async def cmd_balance(
+    message: Message, command: CommandObject, uow: UnitOfWork
+) -> None:
     if message.from_user is None:
         return
 
@@ -42,9 +40,10 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
         telegram_chat_id=message.chat.id,
         group_name=getattr(message.chat, "title", None),
     )
+    await uow.group_members.ensure_member(group.id, caller.id)
 
-    text = (message.text or "").strip()
-    show_all = is_all_selector(text.split())
+    args = (command.args or "").split()
+    show_all = bool(args) and is_all(args[0])
 
     # /balance defaults to the active event's scope (general when none is active).
     # Named cross-scope reads (/balance general, /balance "<event>") are deferred.
@@ -76,7 +75,7 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
             for t in summary.suggested_transfers:
                 lines.append(
                     f"  {display_by_id[t.from_user_id]} → "
-                    f"{display_by_id[t.to_user_id]}: {_amount(t.amount_cents, t.currency)}"
+                    f"{display_by_id[t.to_user_id]}: {format_money(t.amount_cents, t.currency)}"
                 )
 
         await message.reply("\n".join(lines))
@@ -103,11 +102,11 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
         lines.append(f"\nTo settle up ({heading}):")
     for t in owed_to_me:
         lines.append(
-            f"  {display_by_id[t.from_user_id]} pays you {_amount(t.amount_cents, t.currency)}"
+            f"  {display_by_id[t.from_user_id]} pays you {format_money(t.amount_cents, t.currency)}"
         )
     for t in i_owe:
         lines.append(
-            f"  you pay {display_by_id[t.to_user_id]} {_amount(t.amount_cents, t.currency)}"
+            f"  you pay {display_by_id[t.to_user_id]} {format_money(t.amount_cents, t.currency)}"
         )
 
     await message.reply("\n".join(lines))

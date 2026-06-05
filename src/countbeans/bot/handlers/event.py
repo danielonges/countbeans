@@ -22,7 +22,7 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import extract_quoted_description, is_all
 from countbeans.db.models import Group
 from countbeans.dto.commands import (
@@ -285,7 +285,7 @@ async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
     lines = [f'Event: "{open_event.name}"{cur} — {state}']
     lines.append(f"Roster: {_roster_str(roster)}")
     if outstanding:
-        parts = [f"{c} {v // 100}.{v % 100:02d}" for c, v in outstanding.items()]
+        parts = [format_money(v, c) for c, v in outstanding.items()]
         lines.append(f"Outstanding: {', '.join(parts)}")
     else:
         lines.append("All settled up.")

@@ -6,6 +6,11 @@ strings are formatted in the bot layer).
 """
 
 
+def format_money(cents: int, currency: str) -> str:
+    """Format an unsigned integer cent amount as a display string, e.g. ``USD 12.50``."""
+    return f"{currency} {cents // 100}.{cents % 100:02d}"
+
+
 def display_name(username: str | None, first_name: str | None) -> str:
     """Render a user for display: @handle, else first name, else a generic — but
     never a raw UUID.

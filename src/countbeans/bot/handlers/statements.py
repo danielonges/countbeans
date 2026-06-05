@@ -1,7 +1,7 @@
-"""Bot handler for /statements [me] — a paginated ledger statement.
+"""Bot handler for /statements [me|all] — a paginated ledger statement.
 
-`/statements` lists the whole group's expenses and settlements newest-first;
-`/statements me` narrows to the caller's own activity. Paging is driven by
+`/statements` (no arg) and `/statements me` show the caller's own activity
+newest-first; `/statements all` shows the whole group. Paging is driven by
 inline ◀ Prev / Next ▶ buttons whose state lives entirely in the button's
 callback_data (``stmt:g:<page>`` or ``stmt:u:<tg_id>:<page>``) — no FSM, so the
 buttons keep working across restarts. A ``u`` page is bound to its owner: only
@@ -16,7 +16,7 @@ import math
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -24,8 +24,8 @@ from aiogram.types import (
     Message,
 )
 
-from countbeans.bot.utils.formatting import display_name
-from countbeans.bot.utils.parsing import is_all_selector
+from countbeans.bot.utils.formatting import display_name, format_money
+from countbeans.bot.utils.parsing import is_all
 from countbeans.dto.domain import StatementEntry, StatementPage
 from countbeans.services.statements import get_statement_page
 from countbeans.services.uow import UnitOfWork
@@ -35,15 +35,11 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def _money(cents: int, currency: str) -> str:
-    return f"{currency} {cents // 100}.{cents % 100:02d}"
-
-
 def _entry_lines(e: StatementEntry) -> str:
     when = e.created_at.strftime("%b %d %H:%M")
     actor = display_name(e.actor_username, e.actor_first_name)
     if e.kind == "expense":
-        head = f"🧾 {when} · {e.description or 'expense'} — {_money(e.amount_cents, e.currency)}"
+        head = f"🧾 {when} · {e.description or 'expense'} — {format_money(e.amount_cents, e.currency)}"
         if e.voided:
             head = f"❌ {head} (voided)"
         sub = f"    paid by {actor}"
@@ -51,7 +47,7 @@ def _entry_lines(e: StatementEntry) -> str:
             sub += f" · split {e.participant_count}-way"
         return f"{head}\n{sub}"
     other = display_name(e.counterparty_username, e.counterparty_first_name)
-    return f"💸 {when} · {actor} → {other}: {_money(e.amount_cents, e.currency)}"
+    return f"💸 {when} · {actor} → {other}: {format_money(e.amount_cents, e.currency)}"
 
 
 def _render(page: StatementPage, title: str) -> str:
@@ -83,11 +79,14 @@ def _keyboard(page: StatementPage, cb_prefix: str) -> InlineKeyboardMarkup | Non
 
 
 @router.message(Command("statements"))
-async def cmd_statements(message: Message, uow: UnitOfWork) -> None:
+async def cmd_statements(
+    message: Message, command: CommandObject, uow: UnitOfWork
+) -> None:
     if message.from_user is None:
         return
 
-    group_wide = is_all_selector((message.text or "").split())
+    args = (command.args or "").split()
+    group_wide = bool(args) and is_all(args[0])
 
     caller = await uow.users.upsert(
         telegram_user_id=message.from_user.id,
@@ -99,6 +98,7 @@ async def cmd_statements(message: Message, uow: UnitOfWork) -> None:
         telegram_chat_id=message.chat.id,
         group_name=getattr(message.chat, "title", None),
     )
+    await uow.group_members.ensure_member(group.id, caller.id)
 
     if group_wide:
         page = await get_statement_page(uow, group.id, page=0)

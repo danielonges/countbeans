@@ -33,7 +33,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import is_all, parse_amount_cents
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.db.models import Group, User
@@ -60,10 +60,6 @@ _USAGE = (
     "Example: /settleup @alice 25.50\n"
     "Omit the amount to settle the full outstanding debt."
 )
-
-
-def _money(cents: int, currency: str) -> str:
-    return f"{currency} {cents // 100}.{cents % 100:02d}"
 
 
 @router.message(Command("settleup"))
@@ -119,6 +115,7 @@ async def cmd_settleup(
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
     )
+    await uow.group_members.ensure_member(group.id, from_user.id)
 
     # A normal mention must resolve to someone already known — never create a
     # placeholder here (a typo'd /settleup @foo would otherwise leave a stray).
@@ -163,7 +160,7 @@ async def cmd_settleup(
     await message.reply(
         f"Settled up{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{_money(result.amount_cents, result.currency)}{auto_note}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}"
     )
     logger.info(
         "Settlement recorded: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -250,6 +247,7 @@ async def _settle_on_behalf(
         first_name=message.from_user.first_name,
         last_name=message.from_user.last_name,
     )
+    await uow.group_members.ensure_member(group.id, actor.id)
     result = await _record(
         message,
         uow,
@@ -275,7 +273,7 @@ async def _settle_on_behalf(
     await message.reply(
         f"Recorded{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{_money(result.amount_cents, result.currency)}{auto_note}.{confirm}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}.{confirm}"
     )
     logger.info(
         "On-behalf settlement by admin=%s: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -325,9 +323,7 @@ async def _resolve_amount(
     if currency not in owed:
         others = [c for c in owed if c != currency]
         if others:
-            detail = ", ".join(
-                f"{c} {owed[c] // 100}.{owed[c] % 100:02d}" for c in others
-            )
+            detail = ", ".join(format_money(owed[c], c) for c in others)
             await message.reply(
                 f"The suggested settlement has {from_label} paying {to_label} in "
                 f"{detail}, not {currency}. Settle with an explicit amount in that currency."
@@ -422,7 +418,7 @@ async def _settle_whole_group(
     ]
     for r in results:
         lines.append(
-            f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {_money(r.amount_cents, r.currency)}"
+            f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {format_money(r.amount_cents, r.currency)}"
         )
     await message.reply("\n".join(lines))
     logger.info(
