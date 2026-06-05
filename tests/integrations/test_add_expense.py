@@ -164,16 +164,6 @@ async def test_resolve_participants_no_mentions_splits_everyone(
     assert {p.user_id for p in parts} == {alice.id, bob.id}
 
 
-async def test_resolve_participants_all_keyword_splits_everyone(
-    session: AsyncSession,
-) -> None:
-    group, (alice, bob) = await _seed(session)
-    uow = _SessionUoW(session)
-
-    parts = await resolve_participants(uow, group.id, alice.id, ["all"])  # type: ignore[arg-type]
-    assert {p.user_id for p in parts} == {alice.id, bob.id}
-
-
 async def test_resolve_participants_named_excludes_payer(session: AsyncSession) -> None:
     group, (alice, bob) = await _seed_named(session, ["alice", "bob"])
     uow = _SessionUoW(session)

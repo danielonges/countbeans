@@ -17,32 +17,28 @@ from .uow import UnitOfWork
 Id = uuid.UUID
 
 
-def _is_split_everyone(mentions: list[str]) -> bool:
-    """True when an expense should split among the whole group: no @mentions at
-    all, or only the @all keyword."""
-    return not any(h.lower() != "all" for h in mentions)
-
-
 async def resolve_participants(
     uow: UnitOfWork,
     group_id: uuid.UUID,
     payer_id: uuid.UUID,
-    mentions: list[str],
+    named_handles: list[str],
     *,
     event_id: uuid.UUID | None = None,
 ) -> list[MemberInfo]:
-    """Resolve who an expense is split among, from the raw @handles parsed off
-    the command.
+    """Resolve who an expense is split among, from the named @handles parsed off
+    the command. The ``@all`` keyword is bot-layer grammar: the handler strips it
+    (and recognizes "split everyone") via ``parsing.is_all`` before calling here,
+    so this function never sees the literal — an empty list *is* "split everyone".
 
-    * **No named mentions** (none at all, or only ``@all``) → every member the
-      bot knows in the group, the payer included.
-    * **Named mentions** → exactly those users; the payer is **not** added
+    * **No named handles** → every member the bot knows in the group, the payer
+      included.
+    * **Named handles** → exactly those users; the payer is **not** added
       automatically — mention yourself to be included. Unknown handles become
       pending placeholders.
 
     When ``event_id`` is given the scope is the **event roster** (a deliberate
-    opt-in subset of the group): ``@all``/empty splits the roster — no group
-    coverage check, since the roster is intentional — and named mentions join the
+    opt-in subset of the group): an empty list splits the roster — no group
+    coverage check, since the roster is intentional — and named handles join the
     roster implicitly (CLAUDE.md "Events"). The payer is always ensured onto the
     group (and the event roster, when scoped) first, so a "split everyone"
     reflects them and a payer who only ever pays still appears. Returns one
@@ -52,7 +48,7 @@ async def resolve_participants(
     if event_id is not None:
         await uow.events.ensure_member(event_id, payer_id)
 
-    if _is_split_everyone(mentions):
+    if not named_handles:
         scope = f"event={event_id}" if event_id else "group"
         logger.debug("resolve_participants: split=everyone scope=%s", scope)
         if event_id is not None:
@@ -61,9 +57,7 @@ async def resolve_participants(
 
     participants: list[MemberInfo] = []
     seen: set[uuid.UUID] = set()
-    for handle in mentions:
-        if handle.lower() == "all":
-            continue
+    for handle in named_handles:
         user = await uow.users.resolve_mention(handle)
         await uow.group_members.ensure_member(group_id, user.id)
         if event_id is not None:

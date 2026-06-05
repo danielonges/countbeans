@@ -16,7 +16,11 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.formatting import display_name
-from countbeans.bot.utils.parsing import extract_quoted_description, parse_money
+from countbeans.bot.utils.parsing import (
+    extract_quoted_description,
+    is_all,
+    parse_money,
+)
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.uow import UnitOfWork
@@ -93,9 +97,12 @@ async def cmd_addexpense(
     # honored), then scan whatever's left for @mentions — so an @ or quote inside
     # the description is never mistaken for a participant.
     description, rest = extract_quoted_description(rest)
-    mentions = _MENTION_RE.findall(rest)
+    # @all is bot-grammar for "split everyone" — strip it here so the service sees
+    # only real handles (an empty list then *means* everyone). Mixing @all with
+    # named handles drops the @all and splits among the named (CLAUDE.md).
+    named = [h for h in _MENTION_RE.findall(rest) if not is_all(h)]
     participants = await resolve_participants(
-        uow, group.id, payer.id, mentions, event_id=event_id
+        uow, group.id, payer.id, named, event_id=event_id
     )
 
     try:
@@ -150,7 +157,7 @@ async def cmd_addexpense(
     # When splitting the whole group, warn if the bot can't see everyone — it can
     # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside
     # an event, @all means the roster (an intentional subset), so this gate is skipped.
-    if active is None and (not mentions or all(h.lower() == "all" for h in mentions)):
+    if active is None and not named:
         try:
             actual = (
                 await bot.get_chat_member_count(message.chat.id) - 1

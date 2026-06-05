@@ -25,6 +25,7 @@ from aiogram.types import (
 )
 
 from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.parsing import is_all_selector
 from countbeans.dto.domain import StatementEntry, StatementPage
 from countbeans.services.statements import get_statement_page
 from countbeans.services.uow import UnitOfWork
@@ -86,8 +87,7 @@ async def cmd_statements(message: Message, uow: UnitOfWork) -> None:
     if message.from_user is None:
         return
 
-    parts = (message.text or "").split()
-    group_wide = len(parts) > 1 and parts[1].lower() == "all"
+    group_wide = is_all_selector((message.text or "").split())
 
     caller = await uow.users.upsert(
         telegram_user_id=message.from_user.id,

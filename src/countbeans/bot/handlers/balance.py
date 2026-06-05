@@ -8,6 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from countbeans.bot.utils.formatting import display_name
+from countbeans.bot.utils.parsing import is_all_selector
 from countbeans.services.balance import get_group_summary
 from countbeans.services.uow import UnitOfWork
 
@@ -43,8 +44,7 @@ async def cmd_balance(message: Message, uow: UnitOfWork) -> None:
     )
 
     text = (message.text or "").strip()
-    parts = text.split()
-    show_all = len(parts) > 1 and parts[1].lower() == "all"
+    show_all = is_all_selector(text.split())
 
     # /balance defaults to the active event's scope (general when none is active).
     # Named cross-scope reads (/balance general, /balance "<event>") are deferred.

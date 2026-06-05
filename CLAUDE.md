@@ -251,3 +251,27 @@ These are load-bearing for correctness; the *why* is in [docs/spec.md](docs/spec
   closed event into the general balance.
 - **Constraint naming** flows from `Base.metadata.naming_convention` in
   `src/countbeans/db/_base.py` — name `CheckConstraint`s with the logical suffix only.
+
+### The `@all` / `all` keyword (command grammar)
+
+The reserved "everyone" keyword has **one definition** — `ALL_KEYWORD` plus the
+`is_all` / `is_all_selector` predicates in `src/countbeans/bot/utils/parsing.py`.
+Every command routes through these; no handler compares the literal `"all"`
+itself, so the spelling can never drift between commands. It appears in **two
+grammatical families** (the `@`-prefix is the only difference):
+
+- **`@all` — a token in the `@mention`/target namespace**, sitting among
+  `@username` args: `/addexpense … @all` (split everyone), `/settleup @all`
+  (admin whole-group settle), `/event add @all` (fold the whole known group onto
+  the roster; `/event remove @all` has no meaning and is refused). Test an
+  already-extracted `@handle` (without the `@`) with **`is_all`**.
+- **bare `all` — a positional view selector** that pairs with `me`:
+  `/balance all`, `/statements all`. Test the whitespace-split args with
+  **`is_all_selector`**.
+
+**The bot layer is the sole interpreter.** Keyword recognition is bot grammar:
+the `/addexpense` handler strips `@all` (via `is_all`) before calling
+`resolve_participants`, which receives only real handles — an **empty list *is*
+"split everyone."** The service core never sees the literal `"all"`. A new
+command that needs "everyone" reuses these predicates rather than re-typing the
+string.
