@@ -100,6 +100,56 @@ async def test_event_add_remove_roster(dispatcher, session: AsyncSession) -> Non
     assert not any(m.username == "bob" for m in roster)
 
 
+async def test_event_add_all_folds_group_onto_roster(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_member(session, group, telegram_user_id=1002, username="bob")
+    await seed_member(session, group, telegram_user_id=1003, username="carol")
+    # Event starts with only the creator on the roster (a deliberate subset).
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot()
+
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/event add @all", from_id=1001, username="creator"),
+        session=session,
+    )
+    assert "2 group member(s)" in (bot.last_reply or "")  # bob + carol (not creator)
+    roster = await EventRepository(session).list_members(ev.event_id)
+    assert {m.username for m in roster} == {"creator", "bob", "carol"}
+
+    # Idempotent: a second @all adds nobody new.
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/event add @all", from_id=1001, username="creator"),
+        session=session,
+    )
+    assert "already on" in (bot.last_reply or "").lower()
+
+
+async def test_event_remove_all_refused(dispatcher, session: AsyncSession) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot()
+
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/event remove @all", from_id=1001),
+        session=session,
+    )
+    assert "isn't removable" in (bot.last_reply or "")
+
+
 async def test_addexpense_auto_tags_active_event(
     dispatcher, session: AsyncSession
 ) -> None:

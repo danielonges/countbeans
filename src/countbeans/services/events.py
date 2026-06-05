@@ -92,6 +92,23 @@ async def close_event(
         await uow.groups.set_active_event(group_id, None)
 
 
+async def add_group_to_roster(
+    uow: UnitOfWork, group_id: uuid.UUID, event_id: uuid.UUID
+) -> int:
+    """Add every known group member to the event's roster (the ``/event add @all``
+    case). Returns how many were **newly** added. Idempotent: members already on
+    the roster are skipped, so re-running only picks up newcomers. Like ``@all``
+    on an expense, "everyone" means everyone the bot knows (placeholders
+    included); it can't enumerate members it has never seen."""
+    members = await uow.group_members.list_members(group_id)
+    added = 0
+    for m in members:
+        if await uow.events.ensure_member(event_id, m.user_id):
+            added += 1
+    logger.debug("add_group_to_roster: event=%s added=%d", event_id, added)
+    return added
+
+
 async def edit_event_roster(uow: UnitOfWork, cmd: EditEventRosterCommand) -> bool:
     """Add or remove one user from an event's roster. Returns True when the roster
     actually changed (a no-op add/remove returns False)."""

@@ -6,7 +6,7 @@ Subcommands (any member may run these):
   /event pause           stop auto-tagging (log a general expense); stays open
   /event resume          resume auto-tagging to the open event
   /event close           finish the open event, freeing the slot
-  /event add @user       add someone to the event roster (@all means the roster)
+  /event add @user       add someone to the event roster (@all adds the whole group)
   /event remove @user    remove someone from the roster
   /event                 show the active event + usage
 
@@ -23,7 +23,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.formatting import display_name
-from countbeans.bot.utils.parsing import extract_quoted_description
+from countbeans.bot.utils.parsing import extract_quoted_description, is_all
 from countbeans.db.models import Group
 from countbeans.dto.commands import (
     CreateEventCommand,
@@ -33,6 +33,7 @@ from countbeans.dto.commands import (
 )
 from countbeans.dto.domain import MemberInfo
 from countbeans.services.events import (
+    add_group_to_roster,
     close_event,
     create_event,
     edit_event_roster,
@@ -183,6 +184,25 @@ async def _roster(
         await message.reply(f"Usage: /event {action} @user")
         return
     handle = mention.group(1)
+
+    # @all is the reserved "everyone" keyword, never a username (so it can't spawn
+    # a literal "all" placeholder). On `add` it folds the whole known group onto
+    # the roster; on `remove` it has no meaning — name a specific member.
+    if is_all(handle):
+        if action == "add":
+            added = await add_group_to_roster(uow, group.id, open_event.id)
+            note = (
+                f'Added {added} group member(s) to "{open_event.name}".'
+                if added
+                else f'Everyone I know is already on the "{open_event.name}" roster.'
+            )
+            roster = await uow.events.list_members(open_event.id)
+            await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
+            return
+        await message.reply(
+            "@all isn't removable — name a specific @user to take off the roster."
+        )
+        return
 
     if action == "add":
         # Naming someone unseen is fine here — it tracks them as a placeholder,
