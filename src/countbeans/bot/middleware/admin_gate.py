@@ -1,62 +1,17 @@
 import logging
 from typing import Any, Awaitable, Callable
 
-import nanoid
 from aiogram import BaseMiddleware, Bot
 from aiogram.enums import ChatMemberStatus
-from aiogram.types import CallbackQuery, Message, TelegramObject
+from aiogram.types import Message, TelegramObject
 
 from countbeans.bot.handlers._welcome import PROMOTE_REQUEST
-from countbeans.logging.core import log_context
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
 _GROUP_TYPES = {"group", "supergroup"}
 _ADMIN_STATUSES = {ChatMemberStatus.CREATOR, ChatMemberStatus.ADMINISTRATOR}
-
-
-class LoggingContextMiddleware(BaseMiddleware):
-    """Stamps every log record in a request with request_id, user_id, chat_id,
-    and command. Must be registered before TransactionalMiddleware so the
-    request_id is present on the "transaction opened" line."""
-
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: dict[str, Any],
-    ) -> Any:
-        fields: dict[str, Any] = {"request_id": nanoid.generate()}
-        if isinstance(event, Message) and event.from_user:
-            fields["user_id"] = event.from_user.id
-            fields["chat_id"] = event.chat.id
-            fields["command"] = (event.text or "")[:80]
-        elif isinstance(event, CallbackQuery) and event.from_user:
-            fields["user_id"] = event.from_user.id
-            fields["chat_id"] = event.message.chat.id if event.message else None
-            fields["command"] = f"callback:{event.data}"
-        with log_context(**fields):
-            return await handler(event, data)
-
-
-class TransactionalMiddleware(BaseMiddleware):
-    def __init__(self, uow_factory: Callable[[], UnitOfWork]) -> None:
-        self._uow_factory = uow_factory
-
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: dict[str, Any],
-    ) -> Any:
-        try:
-            async with self._uow_factory() as uow:
-                data["uow"] = uow
-                return await handler(event, data)
-        except Exception:
-            logger.warning("unhandled exception in handler", exc_info=True)
-            raise
 
 
 class AdminGateMiddleware(BaseMiddleware):
