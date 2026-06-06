@@ -5,6 +5,25 @@ concerns and live here, never in DTOs or the service core (CLAUDE.md: display
 strings are formatted in the bot layer).
 """
 
+from collections.abc import Collection
+from uuid import UUID
+
+
+def payer_excluded_from_named_split(
+    has_named: bool, participant_ids: Collection[UUID], payer_id: UUID
+) -> bool:
+    """True when a NAMED subset split silently leaves the payer out.
+
+    A named split (the user mentioned participants) intentionally excludes the
+    payer unless they mention themselves — "I paid, these people owe me" (see
+    docs/spec.md "Participant selection"). The everyday case is "I paid for a
+    dinner I also ate", where forgetting to self-mention yields a wrong split, so
+    the handler appends a non-blocking nudge when this returns True. The empty
+    "split everyone" case (``has_named`` False) always includes the payer, so it
+    never nudges.
+    """
+    return has_named and payer_id not in participant_ids
+
 
 def format_money(cents: int, currency: str) -> str:
     """Format an unsigned integer cent amount as a display string, e.g. ``USD 12.50``."""

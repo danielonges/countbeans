@@ -16,7 +16,11 @@ from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
-from countbeans.bot.utils.formatting import display_name, format_money
+from countbeans.bot.utils.formatting import (
+    display_name,
+    format_money,
+    payer_excluded_from_named_split,
+)
 from countbeans.bot.utils.parsing import (
     extract_quoted_description,
     has_split_suffix,
@@ -213,6 +217,18 @@ async def cmd_addexpense(
                 )
         except Exception:
             logger.warning("could not fetch chat member count for %s", message.chat.id)
+
+    # A named subset split intentionally excludes the payer ("I paid, these owe
+    # me") — but the everyday case is a shared expense the payer also took part
+    # in. The split is still recorded as named; this is a non-blocking nudge to
+    # self-mention if they should have been included (the expense is unchanged).
+    if payer_excluded_from_named_split(
+        bool(named or mentioned), cmd.participants, payer.id
+    ):
+        lines.append(
+            "\nℹ️ You're not included in this split. If you shared this expense "
+            "too, @mention your own handle to be added."
+        )
 
     await message.reply("\n".join(lines))
     logger.info(
