@@ -9,7 +9,6 @@ Participant rules (see CLAUDE.md "Splitting an expense"):
 """
 
 import logging
-import re
 
 from aiogram import Bot, Router
 from aiogram.enums import MessageEntityType
@@ -23,9 +22,8 @@ from countbeans.bot.utils.formatting import (
 )
 from countbeans.bot.utils.parsing import (
     extract_quoted_description,
-    has_split_suffix,
-    is_all,
     parse_money,
+    parse_participants,
     unquoted_description,
 )
 from countbeans.dto.commands import AddExpenseCommand, MentionedUser
@@ -36,13 +34,14 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-_MENTION_RE = re.compile(r"@([\w.]+)")
 _USAGE = (
     'Usage: /addexpense <amount> ["description"] [@user ...]\n'
     'Example: /addexpense 25.50 "Dinner" @alice @bob\n'
     "• No @mentions (or @all) → split among everyone in the group.\n"
     "• Name people → split among only them; you're not included unless you "
     "@mention yourself.\n"
+    "• Uneven splits: @alice:30 (exact amount), @alice:60% (percentage — must "
+    "total 100), @alice:2x (weight). Use one style per command.\n"
     "• Quotes are optional — an unquoted description is the words before the "
     "first @mention; quote it only if it contains an @.\n"
     "• Quote the description with any matching pair — \"...\", '...', "
@@ -114,10 +113,20 @@ async def cmd_addexpense(
     # a currency — the fused-marker rule on the amount token is unaffected).
     if description is None:
         description = unquoted_description(rest)
-    # @all is bot-grammar for "split everyone" — strip it here so the service sees
-    # only real handles (an empty list then *means* everyone). Mixing @all with
-    # named handles drops the @all and splits among the named (CLAUDE.md).
-    named = [h for h in _MENTION_RE.findall(rest) if not is_all(h)]
+    # Parse the @mention region into participants + split mode. @all is bot-grammar
+    # for "split everyone" (parse_participants drops it → an empty handle list
+    # *means* everyone). Uneven-split suffixes (@a:30, @a:60%, @a:2x) set the mode;
+    # a malformed split (mixed families, a missing share, a bad number) raises
+    # ValueError HERE — before resolve_participants — so a rejected command never
+    # creates placeholder users / roster rows as a side effect. Scanned on `rest`
+    # (the region after the quoted description was removed), so a ':' or @ inside
+    # the description doesn't trip it.
+    try:
+        split = parse_participants(rest)
+    except ValueError as exc:
+        await message.reply(str(exc))
+        return
+    named = split.handles
     # A text_mention entity carries a real telegram_user_id (a user without a public
     # @handle, or a tap-selected one) → resolve to a claimed user, never a username
     # placeholder (security review #1). NOTE: entities are read from the whole
@@ -134,23 +143,44 @@ async def cmd_addexpense(
         for e in (message.entities or [])
         if e.type == MessageEntityType.TEXT_MENTION and e.user is not None
     ]
-    # Safety net: uneven-split suffixes (@alice:40, @bob:60%, @alice:2x) aren't
-    # implemented yet — the mention regex stops at the ':' and would silently drop
-    # the suffix, recording an EQUAL split with a ✅ (a silent money error). Until
-    # uneven splits land (deferred Should-have), reject instead. Scanned on `rest`
-    # (the mention region after the quoted description was removed), so a ':' inside
-    # the description doesn't trip it. Checked *before* resolve_participants so a
-    # rejected command never creates placeholder users / roster rows as a side effect.
-    if has_split_suffix(rest):
+    # An uneven split is expressed via typed @handle:share tokens; a tapped mention
+    # (text_mention) can't carry a suffix, so it has no share in a non-equal split.
+    if split.mode != "equal" and mentioned:
         await message.reply(
-            "Uneven splits (e.g. @alice:40, @bob:60%, @alice:2x) aren't supported "
-            "yet — everyone named is split equally. Remove the ':' parts to record "
-            "an equal split."
+            "Uneven splits don't support tapped mentions yet — name everyone with a "
+            "typed @handle and a share (e.g. @alice:30)."
         )
         return
+    # Validate the split totals before resolve_participants (friendly messages, and
+    # no placeholder side effects on a bad command); compute_shares re-checks these
+    # inside the transaction as a backstop.
+    if split.params is not None:
+        total = sum(split.params.values())
+        if split.mode == "percent" and total != 100:
+            await message.reply(
+                f"Percentages must add up to 100% — yours total {total}%."
+            )
+            return
+        if split.mode == "exact" and total != amount_cents:
+            await message.reply(
+                "Exact amounts must add up to "
+                f"{format_money(amount_cents, currency)} — yours total "
+                f"{format_money(total, currency)}."
+            )
+            return
 
     participants = await resolve_participants(
         uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
+    )
+
+    # In a non-equal split, map each resolved participant to its parsed share.
+    # split.handles is exact-string-deduped and order-preserved, and (no tapped
+    # mentions in a non-equal split) resolve_participants returns exactly those
+    # users 1:1 in the same order — so zip is sound (see its docstring).
+    split_params = (
+        {p.user_id: split.params[h] for h, p in zip(named, participants)}
+        if split.params is not None
+        else None
     )
 
     try:
@@ -161,6 +191,8 @@ async def cmd_addexpense(
             currency=currency,
             description=description,
             participants=[p.user_id for p in participants],
+            split_mode=split.mode,
+            split_params=split_params,
             event_id=event_id,
             created_by=payer.id,
         )
@@ -191,11 +223,17 @@ async def cmd_addexpense(
             if description
             else f"Added expense — {format_money(result.amount_cents, result.currency)}"
         )
+    # Echo how the amount was divided so an uneven split's interpretation is visible.
+    mode_label = {
+        "exact": " (by exact amount)",
+        "percent": " (by percentage)",
+        "weighted": " (by weight)",
+    }.get(split.mode, "")
     lines = [
         head,
         f"Paid by: {display_name(payer.username, payer.first_name)}",
         f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
-        "Shares:",
+        f"Shares{mode_label}:",
     ]
     for p in participants:
         lines.append(

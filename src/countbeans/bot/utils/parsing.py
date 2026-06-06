@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Sequence
+from typing import Literal, NamedTuple
 
 # The reserved "everyone" keyword. It denotes the same word in two grammatical
 # families (see CLAUDE.md "The @all / all keyword") — only the spelling differs:
@@ -32,22 +33,116 @@ def is_all_selector(args: Sequence[str]) -> bool:
     return bool(args) and is_all(args[0])
 
 
-# A mention carrying an uneven-split suffix: ``@alice:40`` (exact), ``@alice:60%``
-# (percentage), ``@alice:2x`` (weight). Only the ``@handle:`` prefix is matched —
-# the suffix itself isn't validated, since this is a *reject* guard, not a parser.
-# Uneven splits are a deferred Should-have (docs/spec.md "Split modes"); until they
-# exist the bot would silently drop the suffix and equal-split, a money error — so
-# the handler rejects when this matches (see has_split_suffix).
-_SPLIT_SUFFIX_RE = re.compile(r"@[\w.]+:")
+# A participant token: ``@handle`` (equal) or ``@handle:<suffix>`` for an uneven
+# split — ``@a:30`` (exact cents), ``@a:60%`` (percentage), ``@a:2x`` (weight).
+# The suffix is any run of non-space, non-``@`` chars after the colon; its meaning
+# is classified by ``_parse_suffix``.
+_PARTICIPANT_RE = re.compile(r"@([\w.]+)(?::([^\s@]+))?")
+
+# The split mode inferred from the suffix family. "equal" has no suffixes.
+SplitMode = Literal["equal", "exact", "percent", "weighted"]
 
 
-def has_split_suffix(mention_region: str) -> bool:
-    """True if any mention in ``mention_region`` carries a ``:`` split suffix.
+class ParsedSplit(NamedTuple):
+    """The result of parsing a /addexpense mention region.
 
-    ``mention_region`` is the text left *after* the quoted description has been
-    pulled out (see ``extract_quoted_description``), so a colon inside the
-    description never reaches this check and can't cause a false positive."""
-    return _SPLIT_SUFFIX_RE.search(mention_region) is not None
+    * ``mode``    — inferred split mode (see ``SplitMode``).
+    * ``handles`` — participant @handles (without the ``@``), ``@all`` removed,
+      **exact-string-deduped** (first wins, order preserved) so the list stays
+      1:1 with ``resolve_participants``' id-deduped output.
+    * ``params``  — ``handle -> int`` in the mode's unit (exact: cents; percent:
+      whole percent; weighted: integer weight), or ``None`` for an equal split.
+    """
+
+    mode: SplitMode
+    handles: list[str]
+    params: dict[str, int] | None
+
+
+def _parse_suffix(
+    handle: str, suffix: str | None
+) -> tuple[Literal["exact", "percent", "weighted"] | None, int]:
+    """Classify a single mention's split suffix into ``(family, value)``.
+
+    ``None`` family means no suffix (an equal contributor). Raises ``ValueError``
+    with a user-facing message on a malformed suffix. Percentages and weights are
+    **whole numbers**; an exact amount is money (``parse_amount_cents`` — ≤2dp,
+    positive). Sums are validated by the caller, not here."""
+    if suffix is None:
+        return None, 0
+    if suffix.endswith("%"):
+        body = suffix[:-1]
+        if not body.isdigit():
+            raise ValueError(
+                f"Percentages must be whole numbers — @{handle}:{suffix} isn't "
+                f"(try @{handle}:60%)."
+            )
+        return "percent", int(body)
+    if suffix.endswith(("x", "X")):
+        body = suffix[:-1]
+        if not body.isdigit():
+            raise ValueError(
+                f"Weights must be whole numbers — @{handle}:{suffix} isn't "
+                f"(try @{handle}:2x)."
+            )
+        return "weighted", int(body)
+    try:
+        return "exact", parse_amount_cents(suffix)
+    except ValueError as exc:
+        raise ValueError(
+            f"@{handle}:{suffix} isn't a valid amount — use an amount like "
+            f"@{handle}:30 or @{handle}:30.50."
+        ) from exc
+
+
+def parse_participants(mention_region: str) -> ParsedSplit:
+    """Parse the @mention region of /addexpense into participants and a split mode.
+
+    Each token is ``@handle`` (equal) or ``@handle:<suffix>`` for an uneven split
+    (``@a:30`` exact / ``@a:60%`` percentage / ``@a:2x`` weight). The mode is the
+    suffix family and must be uniform across the named participants. ``@all`` is
+    the everyone-keyword (``is_all``): it is dropped from ``handles`` (an empty
+    list then *means* everyone) and may never carry a suffix.
+
+    Raises ``ValueError`` (with a user-facing message) on a malformed split —
+    mixed families, a participant missing its share, a bad number, or a suffix on
+    ``@all``. The handler calls this **before** ``resolve_participants`` so a
+    rejected command never creates placeholder users. Sums (percent → 100, exact
+    → amount) are checked by the handler, where the amount/currency are known.
+    """
+    handles: list[str] = []
+    seen: set[str] = set()
+    # handle -> (family, value); family None means an equal contributor (no suffix).
+    parsed: dict[str, tuple[Literal["exact", "percent", "weighted"] | None, int]] = {}
+
+    for match in _PARTICIPANT_RE.finditer(mention_region):
+        handle, suffix = match.group(1), match.group(2)
+        if is_all(handle):
+            if suffix is not None:
+                raise ValueError("@all can't carry a split amount — drop the ':' part.")
+            continue  # the everyone-keyword, never a share target
+        if handle in seen:
+            continue  # exact-string dedup; first occurrence (and its share) wins
+        seen.add(handle)
+        handles.append(handle)
+        parsed[handle] = _parse_suffix(handle, suffix)
+
+    families: set[SplitMode] = {fam for fam, _ in parsed.values() if fam is not None}
+    if not families:
+        return ParsedSplit("equal", handles, None)
+    if len(families) > 1:
+        raise ValueError(
+            "Don't mix split types in one command — use all exact amounts, all "
+            "percentages (@a:60%), or all weights (@a:2x)."
+        )
+    (family,) = families
+    missing = [h for h, (fam, _) in parsed.items() if fam is None]
+    if missing:
+        raise ValueError(
+            f"In an uneven split everyone needs a share — @{missing[0]} is missing "
+            f"one (e.g. @{missing[0]}:30, @{missing[0]}:60%, or @{missing[0]}:2x)."
+        )
+    return ParsedSplit(family, handles, {h: val for h, (_, val) in parsed.items()})
 
 
 # Opening → closing quote characters accepted around a description. Covers the

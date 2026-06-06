@@ -3,7 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Expense, ExpenseShare
+from countbeans.db.models import Expense, ExpenseShare, User
 from countbeans.services.repositories import UserRepository
 
 from ._bot_harness import MockedBot, feed, make_message, text_mention_entity
@@ -20,6 +20,19 @@ async def _share_count(session: AsyncSession) -> int:
     return (
         await session.execute(select(func.count()).select_from(ExpenseShare))
     ).scalar_one()
+
+
+async def _shares_by_username(session: AsyncSession) -> dict[str | None, int]:
+    """Map each recorded share to its participant's @username — for asserting how
+    an uneven split apportioned the amount."""
+    rows = (
+        await session.execute(
+            select(User.username, ExpenseShare.share_cents).join(
+                ExpenseShare, ExpenseShare.user_id == User.id
+            )
+        )
+    ).all()
+    return {username: cents for username, cents in rows}
 
 
 async def test_addexpense_usage_on_no_args(dispatcher, session: AsyncSession) -> None:
@@ -132,3 +145,102 @@ async def test_addexpense_whole_group_warns_about_unseen_members(
     assert "Added expense" in reply
     assert "haven't interacted" in reply
     assert "/join" in reply
+
+
+async def test_addexpense_exact_split(dispatcher, session: AsyncSession) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 50 "Dinner" @alice:30 @bob:20',
+            from_id=1001,
+            username="caller",
+        ),
+        session=session,
+    )
+
+    assert "by exact amount" in (bot.last_reply or "")
+    assert await _expense_count(session) == 1
+    assert await _shares_by_username(session) == {"alice": 3000, "bob": 2000}
+
+
+async def test_addexpense_percent_split(dispatcher, session: AsyncSession) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 100 "Trip" @alice:60% @bob:40%',
+            from_id=1001,
+            username="caller",
+        ),
+        session=session,
+    )
+
+    assert "by percentage" in (bot.last_reply or "")
+    assert await _shares_by_username(session) == {"alice": 6000, "bob": 4000}
+
+
+async def test_addexpense_weighted_split(dispatcher, session: AsyncSession) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 90 "Cab" @alice:2x @bob:1x', from_id=1001, username="caller"
+        ),
+        session=session,
+    )
+
+    assert "by weight" in (bot.last_reply or "")
+    # apportion 9000 by {alice:2, bob:1} → 6000 / 3000, summing to the amount.
+    shares = await _shares_by_username(session)
+    assert shares == {"alice": 6000, "bob": 3000}
+    assert sum(shares.values()) == 9000
+
+
+async def test_addexpense_mixed_families_rejected_no_side_effects(
+    dispatcher, session: AsyncSession
+) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 50 "x" @alice:30 @bob:40%', from_id=1001, username="caller"
+        ),
+        session=session,
+    )
+
+    assert "mix" in (bot.last_reply or "")
+    # Rejected *before* resolve_participants: no expense and no placeholder users.
+    assert await _expense_count(session) == 0
+    users = UserRepository(session)
+    assert await users.find_by_mention("alice") is None
+    assert await users.find_by_mention("bob") is None
+
+
+async def test_addexpense_exact_wrong_sum_rejected_no_side_effects(
+    dispatcher, session: AsyncSession
+) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 50 "x" @alice:30 @bob:30', from_id=1001, username="caller"
+        ),
+        session=session,
+    )
+
+    assert "add up to" in (bot.last_reply or "")
+    assert await _expense_count(session) == 0
+    users = UserRepository(session)
+    assert await users.find_by_mention("alice") is None
+    assert await users.find_by_mention("bob") is None
