@@ -90,6 +90,29 @@ def extract_quoted_description(text: str) -> tuple[str | None, str]:
     return None, text
 
 
+def unquoted_description(text: str) -> str | None:
+    """The unquoted description: the run of words before the first ``@`` mention.
+
+    Per the spec (``/addexpense`` grammar rule 2), when there is no *quoted*
+    description the description is "the run of words between the amount and the
+    first @mention". The amount token is already consumed by the caller, so
+    ``text`` is everything after it; we take the substring up to the first literal
+    ``@`` and trim surrounding whitespace. Returns ``None`` when that run is empty
+    (e.g. ``"@bob"`` or ``""``), so the caller can distinguish "no description".
+
+    The quoted path (``extract_quoted_description``) always wins — call this only
+    as the fallback when it returns ``None``.
+
+    NOTE: a ``text_mention`` entity (a tap-selected user with no public ``@``
+    handle) carries no literal ``@`` in the message text, so its display name
+    could land inside this unquoted run. This is rare and acceptable — the reply
+    echoes the resulting split.
+    """
+    at = text.find("@")
+    run = (text if at == -1 else text[:at]).strip()
+    return run or None
+
+
 # Currency *symbols* that map to exactly one ISO-4217 code in this app's context.
 # Deliberately omits `$`, which is ambiguous across USD/SGD/AUD/CAD/HKD/…: rather
 # than guess (and risk silently mis-currencying a money ledger), `$` is resolved

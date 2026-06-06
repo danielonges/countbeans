@@ -21,6 +21,7 @@ from countbeans.bot.utils.parsing import (
     extract_quoted_description,
     is_all,
     parse_money,
+    unquoted_description,
 )
 from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.services.add_expense import add_expense, resolve_participants
@@ -37,6 +38,8 @@ _USAGE = (
     "• No @mentions (or @all) → split among everyone in the group.\n"
     "• Name people → split among only them; you're not included unless you "
     "@mention yourself.\n"
+    "• Quotes are optional — an unquoted description is the words before the "
+    "first @mention; quote it only if it contains an @.\n"
     "• Quote the description with any matching pair — \"...\", '...', "
     "“...”/‘...’ (curly, handy on phones), "
     "«...», or `...`. Escape a quote inside with a backslash: "
@@ -99,6 +102,13 @@ async def cmd_addexpense(
     # honored), then scan whatever's left for @mentions — so an @ or quote inside
     # the description is never mistaken for a participant.
     description, rest = extract_quoted_description(rest)
+    # No quoted description → fall back to the unquoted run of words between the
+    # amount and the first @mention (spec /addexpense rule 2). A quoted
+    # description always wins; `rest` is left untouched so @mentions still parse
+    # from it exactly as before (a standalone "USD" word becomes description, not
+    # a currency — the fused-marker rule on the amount token is unaffected).
+    if description is None:
+        description = unquoted_description(rest)
     # @all is bot-grammar for "split everyone" — strip it here so the service sees
     # only real handles (an empty list then *means* everyone). Mixing @all with
     # named handles drops the @all and splits among the named (CLAUDE.md).
