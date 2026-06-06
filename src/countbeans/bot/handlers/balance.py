@@ -59,6 +59,13 @@ async def cmd_balance(
     display_by_id: dict[uuid.UUID, str] = {
         b.user_id: display_name(b.username, b.first_name) for b in summary.balances
     }
+    logger.debug(
+        "balance: scope=%s event_id=%s group=%s balances=%d",
+        "all" if show_all else "me",
+        active.id if active else None,
+        group.id,
+        len(summary.balances),
+    )
 
     if show_all:
         if not summary.balances:

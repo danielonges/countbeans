@@ -52,6 +52,11 @@ async def cmd_simplify(
 
     # Changing the setting is admin-only.
     if not await is_admin(bot, message.chat.id, message.from_user.id):
+        logger.info(
+            "Refused /simplify: user=%s is not an admin in chat=%s",
+            message.from_user.id,
+            message.chat.id,
+        )
         await message.reply("Only group admins can change debt simplification.")
         return
 

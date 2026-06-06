@@ -110,6 +110,12 @@ async def cmd_statements(
         title, cb_prefix = "📋 Your statement", f"stmt:u:{message.from_user.id}"
 
     await message.reply(_render(page, title), reply_markup=_keyboard(page, cb_prefix))
+    logger.debug(
+        "statements: scope=%s group=%s page=0 total=%d",
+        "all" if group_wide else "me",
+        group.id,
+        page.total,
+    )
 
 
 @router.callback_query(F.data.startswith("stmt:"))
@@ -137,6 +143,11 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
     elif scope == "u":
         subject_tg, page_no = int(parts[2]), int(parts[3])
         if callback.from_user.id != subject_tg:
+            logger.debug(
+                "statements paging denied: user=%s tried to page subject=%s",
+                callback.from_user.id,
+                subject_tg,
+            )
             await callback.answer(
                 "That's not your statement — run /statements me.", show_alert=True
             )
@@ -154,11 +165,12 @@ async def on_statements_page(callback: CallbackQuery, uow: UnitOfWork) -> None:
         await callback.answer()
         return
 
+    logger.debug("statements page: scope=%s group=%s page=%d", scope, group.id, page_no)
     try:
         await callback.message.edit_text(
             _render(page, title), reply_markup=_keyboard(page, cb_prefix)
         )
     except TelegramBadRequest:
         # "message is not modified" — e.g. a double-tap on the same page. Harmless.
-        pass
+        logger.debug("statements page edit skipped (not modified)")
     await callback.answer()

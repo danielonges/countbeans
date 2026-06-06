@@ -66,6 +66,11 @@ class AdminGateMiddleware(BaseMiddleware):
         member = await bot.get_chat_member(event.chat.id, self._bot_id)
         is_admin = member.status in ADMIN_STATUSES
         await uow.groups.set_bot_admin(group.id, is_admin)
+        logger.debug(
+            "admin-gate self-heal: chat=%s bot_is_admin=%s (stored flag was false)",
+            event.chat.id,
+            is_admin,
+        )
         if is_admin:
             return await handler(event, data)
 

@@ -217,7 +217,11 @@ async def cmd_addexpense(
                     f"{gap} more haven't interacted yet. Ask them to /join to be included."
                 )
         except Exception:
-            logger.warning("could not fetch chat member count for %s", message.chat.id)
+            logger.warning(
+                "could not fetch chat member count for %s",
+                message.chat.id,
+                exc_info=True,
+            )
 
     # A named subset split intentionally excludes the payer ("I paid, these owe
     # me") — but the everyday case is a shared expense the payer also took part

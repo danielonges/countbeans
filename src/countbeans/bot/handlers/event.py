@@ -95,6 +95,12 @@ async def cmd_event(
     if sub in _MUTATING_SUBCOMMANDS and not await is_admin(
         bot, message.chat.id, message.from_user.id
     ):
+        logger.info(
+            "Refused /event %s: user=%s is not an admin in chat=%s",
+            sub,
+            message.from_user.id,
+            message.chat.id,
+        )
         await message.reply(
             "Only group admins can manage events (start, pause, resume, close, or "
             "edit the roster). Anyone can view the current event with /event info."
@@ -194,6 +200,7 @@ async def _pause(message: Message, uow: UnitOfWork, group: Group) -> None:
     await message.reply(
         f'⏸ Paused "{open_event.name}". New expenses are general until /event resume.'
     )
+    logger.info("Event paused: event_id=%s group_id=%s", open_event.id, group.id)
 
 
 async def _resume(message: Message, uow: UnitOfWork, group: Group) -> None:
@@ -212,6 +219,7 @@ async def _resume(message: Message, uow: UnitOfWork, group: Group) -> None:
     await message.reply(
         f'▶️ Resumed "{open_event.name}". New expenses tag to it again.'
     )
+    logger.info("Event resumed: event_id=%s group_id=%s", open_event.id, group.id)
 
 
 async def _close(message: Message, uow: UnitOfWork, group: Group) -> None:
@@ -263,6 +271,12 @@ async def _roster(
                 event_id=open_event.id, user_id=user.id, action="add"
             ),
         )
+        logger.info(
+            "Event roster add (text_mention): event_id=%s user_id=%s changed=%s",
+            open_event.id,
+            user.id,
+            changed,
+        )
         label = display_name(user.username, user.first_name)
         note = (
             f'Added {label} to "{open_event.name}".'
@@ -285,6 +299,9 @@ async def _roster(
     if is_all(handle):
         if action == "add":
             added = await add_group_to_roster(uow, group.id, open_event.id)
+            logger.info(
+                "Event roster add @all: event_id=%s added=%d", open_event.id, added
+            )
             note = (
                 f'Added {added} group member(s) to "{open_event.name}".'
                 if added
@@ -330,6 +347,13 @@ async def _roster(
             return
         note = f'Removed @{handle} from "{open_event.name}".'
 
+    logger.info(
+        "Event roster %s: event_id=%s user_id=%s changed=%s",
+        action,
+        open_event.id,
+        user.id,
+        changed,
+    )
     roster = await uow.events.list_members(open_event.id)
     await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
 

@@ -1,5 +1,6 @@
 """Repository classes — the only objects that hold SQLAlchemy models."""
 
+import logging
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from countbeans.db.models import (
 )
 from countbeans.dto.domain import ActivitySummary, BalanceKey, BalanceMap, MemberInfo
 from countbeans.dto.results import EventCreatedResult, SettlementCreatedResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -387,6 +390,16 @@ class UserRepository:
                 placeholder.first_name = first_name
                 placeholder.last_name = last_name
                 await self._session.flush()
+                # The moment a pending @handle becomes a real identity and
+                # inherits its ledger rows — worth an audit line (security #1).
+                logger.info(
+                    "claimed placeholder user_id=%s username=%s group=%s "
+                    "telegram_user_id=%s",
+                    placeholder.id,
+                    username,
+                    claim_in_group,
+                    telegram_user_id,
+                )
                 return placeholder
 
         # Genuinely new user: insert a fresh claimed row.
@@ -428,6 +441,7 @@ class UserRepository:
         user = User(id=uuid_utils.uuid7(), username=username)
         self._session.add(user)
         await self._session.flush()
+        logger.debug("created placeholder user_id=%s for @%s", user.id, username)
         return user
 
 

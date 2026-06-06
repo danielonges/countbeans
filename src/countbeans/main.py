@@ -1,15 +1,20 @@
 import asyncio
+import logging
 import sys
 
 from countbeans.bot.server import run
 from countbeans.config import get_settings
 from countbeans.logging import setup as setup_logging
 
+logger = logging.getLogger(__name__)
+
 
 def main() -> int:
     settings = get_settings()
     setup_logging(level=settings.log_level)
+    logger.info("countbeans starting (log_level=%s)", settings.log_level)
     asyncio.run(run(settings.bot_token.get_secret_value()))
+    logger.info("countbeans stopped")
     return 0
 
 

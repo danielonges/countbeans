@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
@@ -30,6 +32,8 @@ from countbeans.bot.middleware import (
 )
 from countbeans.config import get_settings
 from countbeans.services.uow import UnitOfWork
+
+logger = logging.getLogger(__name__)
 
 _COMMANDS = [
     BotCommand(command="start", description="Set up the bot here (admin)"),
@@ -68,6 +72,11 @@ async def run(token: str) -> None:
         # Resilience for the always-on poller — see Settings for the rationale.
         pool_pre_ping=settings.db_pool_pre_ping,
         pool_recycle=settings.db_pool_recycle_seconds,
+    )
+    logger.info(
+        "database engine created (pool_pre_ping=%s pool_recycle=%ss)",
+        settings.db_pool_pre_ping,
+        settings.db_pool_recycle_seconds,
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -125,6 +134,8 @@ async def run(token: str) -> None:
         # chat_member is not delivered unless explicitly requested; resolving the
         # used update types from the registered handlers opts us into both the
         # my_chat_member and chat_member streams.
+        logger.info("command menus published; starting long-polling")
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         await engine.dispose()
+        logger.info("polling stopped; database engine disposed")

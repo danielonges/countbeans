@@ -38,7 +38,11 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         chat_count = await bot.get_chat_member_count(message.chat.id)
         actual_count = chat_count - 1  # subtract the bot itself
     except Exception:
-        logger.warning("Could not fetch chat member count for %s", message.chat.id)
+        logger.warning(
+            "Could not fetch chat member count for %s",
+            message.chat.id,
+            exc_info=True,
+        )
         actual_count = None
 
     info = await get_group_info(
@@ -48,6 +52,12 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         default_currency=group.default_currency,
         simplify_debts=group.simplify_debts,
         actual_count=actual_count,
+    )
+    logger.debug(
+        "group info: group=%s known=%s actual=%s",
+        group.id,
+        info.known_count,
+        info.actual_count,
     )
 
     lines: list[str] = []
