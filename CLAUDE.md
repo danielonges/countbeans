@@ -207,6 +207,8 @@ All config lives in `src/countbeans/config/core.py` using `pydantic-settings`. E
 | `COUNTBEANS_BOT_TOKEN` | `str` | Telegram bot token (from @BotFather) |
 | `COUNTBEANS_DATABASE_URL` | `str` | SQLAlchemy async DSN, e.g. `postgresql+asyncpg://user:pass@host:5432/db` |
 | `COUNTBEANS_LOG_LEVEL` | `str` | Root log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `INFO`) |
+| `COUNTBEANS_DB_POOL_PRE_PING` | `bool` | Liveness-check pooled connections on checkout, transparently replacing stale ones (default: `True`) |
+| `COUNTBEANS_DB_POOL_RECYCLE_SECONDS` | `int` | Retire pooled connections older than this many seconds; `-1` disables (default: `1800`) |
 
 `BOT_TOKEN` and `DATABASE_URL` are required — the app raises a `ValidationError` at startup if either is missing. Use a `.env` file at the project root (copy `.env.example` and fill in the values). When running via Docker Compose, `COUNTBEANS_DATABASE_URL` is injected automatically by `compose.yml`, so only `COUNTBEANS_BOT_TOKEN` must be present in `.env`. (The bot uses the Telegram **Bot API** via aiogram, which needs only the bot token — there is no MTProto `API_ID`/`API_HASH`.)
 

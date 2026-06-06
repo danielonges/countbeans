@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     database_url: PostgresDsn
     log_level: str = "INFO"
 
+    # Connection-pool resilience for the always-on long-polling process. Pooled
+    # connections go stale across idle periods (PG restart/failover, NAT/firewall
+    # idle timeouts, managed poolers dropping idle server-side connections); the
+    # next query then fails unless we guard against it.
+    #   pre_ping: lightweight liveness check on checkout, transparently replacing
+    #     a dead connection instead of erroring the user's command.
+    #   recycle_seconds: proactively retire connections older than this (-1 to
+    #     disable). Belt-and-suspenders, useful behind connection poolers.
+    db_pool_pre_ping: bool = True
+    db_pool_recycle_seconds: int = 1800
+
 
 @cache
 def get_settings() -> Settings:

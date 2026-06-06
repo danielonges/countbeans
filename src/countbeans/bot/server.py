@@ -62,7 +62,13 @@ _COMMANDS = [
 
 async def run(token: str) -> None:
     settings = get_settings()
-    engine = create_async_engine(str(settings.database_url), echo=False)
+    engine = create_async_engine(
+        str(settings.database_url),
+        echo=False,
+        # Resilience for the always-on poller — see Settings for the rationale.
+        pool_pre_ping=settings.db_pool_pre_ping,
+        pool_recycle=settings.db_pool_recycle_seconds,
+    )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     def uow_factory() -> UnitOfWork:
