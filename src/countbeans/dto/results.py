@@ -1,6 +1,7 @@
 """Outbound result DTOs — returned from the service core after a mutating operation."""
 
 import uuid
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +43,32 @@ class ExpenseCreatedResult(BaseModel):
     description: str | None
     shares: dict[uuid.UUID, int]
     event_id: uuid.UUID | None
+
+
+class VoidOutcome(StrEnum):
+    """Why a /void did or didn't happen, so the handler can pick the reply without
+    re-deriving it (and without holding any SQLAlchemy state)."""
+
+    VOIDED = "voided"  # the expense was stamped voided
+    NOTHING = "nothing"  # the scope had no active expense to void
+    FORBIDDEN = "forbidden"  # caller is neither owner/creator nor a group admin
+
+
+class ExpenseVoidedResult(BaseModel):
+    """Outcome of a /void. `outcome` says what happened; the expense fields are
+    populated for VOIDED (echo what was undone) and FORBIDDEN (name who *can*
+    void it via `payer_id` / `created_by`), and are None for NOTHING."""
+
+    model_config = ConfigDict(frozen=True)
+
+    outcome: VoidOutcome
+    expense_id: uuid.UUID | None = None
+    amount_cents: int | None = None
+    currency: str | None = None
+    description: str | None = None
+    payer_id: uuid.UUID | None = None
+    created_by: uuid.UUID | None = None
+    event_id: uuid.UUID | None = None
 
 
 class EventCreatedResult(BaseModel):

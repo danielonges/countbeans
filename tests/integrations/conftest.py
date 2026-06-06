@@ -58,6 +58,7 @@ def dispatcher() -> Dispatcher:
         simplify,
         start,
         statements,
+        void,
     )
 
     return build_dispatcher(
@@ -65,6 +66,7 @@ def dispatcher() -> Dispatcher:
         join.router,
         settleup.router,
         addexpense.router,
+        void.router,
         balance.router,
         simplify.router,
         currency.router,

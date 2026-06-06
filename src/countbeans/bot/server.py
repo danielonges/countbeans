@@ -20,6 +20,7 @@ from countbeans.bot.handlers import (
     simplify,
     start,
     statements,
+    void,
 )
 from countbeans.bot.middleware import (
     AdminGateMiddleware,
@@ -37,6 +38,7 @@ _COMMANDS = [
         command="balance", description="View your balance (or 'all' for everyone)"
     ),
     BotCommand(command="settleup", description="Record a payment to another member"),
+    BotCommand(command="void", description="Undo your most recent expense"),
     BotCommand(
         command="simplify", description="View or toggle debt simplification (admin)"
     ),
@@ -83,6 +85,7 @@ async def run(token: str) -> None:
     dp.include_router(join.router)
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
+    dp.include_router(void.router)
     dp.include_router(balance.router)
     dp.include_router(simplify.router)
     dp.include_router(currency.router)

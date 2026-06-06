@@ -84,6 +84,37 @@ class ExpenseRepository:
         )
         await self._session.flush()
 
+    async def latest_active_in_scope(
+        self, group_id: uuid.UUID, *, event_id: uuid.UUID | None
+    ) -> Expense | None:
+        """The most-recent non-voided expense in one scope (newest `created_at`
+        first), or None when the scope has nothing left to void.
+
+        The scope is the **general** ledger (``event_id IS NULL``) when ``event_id``
+        is None, else exactly that event's rows — mirroring BalanceRepository so a
+        /void only ever touches the scope the caller is currently in (CLAUDE.md
+        "Events")."""
+        scope = (
+            Expense.event_id == event_id
+            if event_id is not None
+            else Expense.event_id.is_(None)
+        )
+        result = await self._session.execute(
+            select(Expense)
+            .where(Expense.group_id == group_id, Expense.voided_at.is_(None), scope)
+            .order_by(Expense.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_voided(self, expense: Expense, *, voided_by: uuid.UUID) -> None:
+        """Stamp the void fields on an already-fetched expense. The row stays in
+        place (append-only ledger — never deleted); balances already exclude
+        voided rows via `voided_at IS NULL`."""
+        expense.voided_at = _now()
+        expense.voided_by = voided_by
+        await self._session.flush()
+
     async def activity_summary(self, group_id: uuid.UUID) -> list[ActivitySummary]:
         """Active (non-voided) expense count and total per currency for a group."""
         rows = await self._session.execute(
