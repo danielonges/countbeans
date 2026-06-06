@@ -19,6 +19,7 @@ from aiogram.types import Message
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import (
     extract_quoted_description,
+    has_split_suffix,
     is_all,
     parse_money,
     unquoted_description,
@@ -132,6 +133,20 @@ async def cmd_addexpense(
     participants = await resolve_participants(
         uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
     )
+
+    # Safety net: uneven-split suffixes (@alice:40, @bob:60%, @alice:2x) aren't
+    # implemented yet — the mention regex stops at the ':' and would silently drop
+    # the suffix, recording an EQUAL split with a ✅ (a silent money error). Until
+    # uneven splits land (deferred Should-have), reject instead. Scanned on `rest`
+    # (the mention region after the quoted description was removed), so a ':' inside
+    # the description doesn't trip it.
+    if has_split_suffix(rest):
+        await message.reply(
+            "Uneven splits (e.g. @alice:40, @bob:60%, @alice:2x) aren't supported "
+            "yet — everyone named is split equally. Remove the ':' parts to record "
+            "an equal split."
+        )
+        return
 
     try:
         cmd = AddExpenseCommand(

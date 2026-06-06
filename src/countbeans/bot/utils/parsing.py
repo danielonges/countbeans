@@ -32,6 +32,24 @@ def is_all_selector(args: Sequence[str]) -> bool:
     return bool(args) and is_all(args[0])
 
 
+# A mention carrying an uneven-split suffix: ``@alice:40`` (exact), ``@alice:60%``
+# (percentage), ``@alice:2x`` (weight). Only the ``@handle:`` prefix is matched —
+# the suffix itself isn't validated, since this is a *reject* guard, not a parser.
+# Uneven splits are a deferred Should-have (docs/spec.md "Split modes"); until they
+# exist the bot would silently drop the suffix and equal-split, a money error — so
+# the handler rejects when this matches (see has_split_suffix).
+_SPLIT_SUFFIX_RE = re.compile(r"@[\w.]+:")
+
+
+def has_split_suffix(mention_region: str) -> bool:
+    """True if any mention in ``mention_region`` carries a ``:`` split suffix.
+
+    ``mention_region`` is the text left *after* the quoted description has been
+    pulled out (see ``extract_quoted_description``), so a colon inside the
+    description never reaches this check and can't cause a false positive."""
+    return _SPLIT_SUFFIX_RE.search(mention_region) is not None
+
+
 # Opening → closing quote characters accepted around a description. Covers the
 # straight ASCII quotes and the "smart"/curly quotes mobile keyboards substitute
 # automatically (the common reason a typed "…" fails to match) — plus backticks.
