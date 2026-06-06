@@ -52,6 +52,7 @@ def dispatcher() -> Dispatcher:
         currency,
         event,
         group,
+        help,
         join,
         membership,
         settleup,
@@ -64,6 +65,7 @@ def dispatcher() -> Dispatcher:
     return build_dispatcher(
         start.router,
         join.router,
+        help.router,
         settleup.router,
         addexpense.router,
         void.router,

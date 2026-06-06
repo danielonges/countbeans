@@ -14,6 +14,7 @@ from countbeans.bot.handlers import (
     currency,
     event,
     group,
+    help,
     join,
     membership,
     settleup,
@@ -33,6 +34,7 @@ from countbeans.services.uow import UnitOfWork
 _COMMANDS = [
     BotCommand(command="start", description="Set up the bot here (admin)"),
     BotCommand(command="join", description="Add yourself to expense tracking"),
+    BotCommand(command="help", description="List the commands and how to use them"),
     BotCommand(command="addexpense", description="Record an expense"),
     BotCommand(
         command="balance", description="View your balance (or 'all' for everyone)"
@@ -83,6 +85,7 @@ async def run(token: str) -> None:
     dp.message.middleware(AdminGateMiddleware())
     dp.include_router(start.router)
     dp.include_router(join.router)
+    dp.include_router(help.router)
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
     dp.include_router(void.router)
@@ -107,7 +110,8 @@ async def run(token: str) -> None:
                 BotCommand(
                     command="start",
                     description="Add me to a group to start tracking expenses",
-                )
+                ),
+                BotCommand(command="help", description="How to use countbeans"),
             ],
             scope=BotCommandScopeAllPrivateChats(),
         )

@@ -1,21 +1,53 @@
-"""Shared group-chat copy used by both /start (manual setup) and the
-my_chat_member handler (the bot being added/promoted). Kept in one place so the
-command list never drifts between the two entry points."""
+"""Shared group-chat copy used by /start (manual setup), /help (on-demand), and
+the my_chat_member handler (the bot being added/promoted). The command list lives
+in one constant — COMMAND_REFERENCE — so it never drifts between these entry
+points (and stays in step with server.py's terse command-menu descriptions)."""
+
+# Single source of truth for the human-readable command list (richer one-liners
+# than the constrained Telegram command-menu descriptions in server.py). Both the
+# welcome and /help render from this, so adding a command updates every entry
+# point at once.
+COMMAND_REFERENCE = (
+    "Commands:\n"
+    '• /addexpense <amount> "<desc>" [@user …] — record an expense\n'
+    "• /balance [all] — your net position, or every member's with /balance all\n"
+    "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
+    "• /void — undo your most recent expense\n"
+    "• /statements [all] — your transactions, or the whole group's with /statements all\n"
+    "• /event … — track a trip or dinner as its own scope (new/pause/resume/close/add/remove)\n"
+    "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
+    "• /currency [CODE] — view or (admins) set the group's default currency\n"
+    "• /group — group info, members, and activity"
+)
 
 GROUP_WELCOME = (
     "👋 Hi! I'm countbeans — I track shared expenses for this group so nobody "
     "has to do the mental math.\n"
     "\n"
-    "Commands:\n"
-    '• /addexpense <amount> "<desc>" [@user …] — record an expense\n'
-    "• /balance [all] — your net position, or every member's with /balance all\n"
-    "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
-    "• /statements [all] — your transactions, or the whole group's with /statements all\n"
-    "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
-    "• /currency [CODE] — view or (admins) set the group's default currency\n"
-    "• /group — group info, members, and activity\n"
+    f"{COMMAND_REFERENCE}\n"
     "\n"
     "Everyone: run /join to be added to this group's ledger."
+)
+
+# /help — the on-demand command reference. The payoff line is the tip: every
+# command already shows its own detailed usage when sent with no arguments, so
+# /help just surfaces that rather than duplicating each command's grammar.
+GROUP_HELP = (
+    "🫘 countbeans — I track and split shared expenses for this group.\n"
+    "\n"
+    f"{COMMAND_REFERENCE}\n"
+    "\n"
+    "Tip: send any command with no arguments to see exactly how it works "
+    "(e.g. just /addexpense or /settleup).\n"
+    "New here? Run /join to be added to the ledger."
+)
+
+# /help in a private chat — the bot is group-only, so point the user to a group.
+PRIVATE_HELP = (
+    "🫘 I'm countbeans, a shared-expense tracker for Telegram groups.\n"
+    "\n"
+    "I only work inside a group chat — add me to one, then send /help there to "
+    "see everything I can do."
 )
 
 # Shown when the bot is in the group but not an administrator. It needs admin

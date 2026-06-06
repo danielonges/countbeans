@@ -10,6 +10,21 @@ from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
+# Commands that must work even before the bot is an administrator: a confused
+# installer in the added-but-not-promoted window should still be able to get
+# oriented. /help is pure, read-only info (touches no state), so letting it
+# through the gate is safe.
+_GATE_BYPASS_COMMANDS = {"help"}
+
+
+def _command_name(text: str | None) -> str | None:
+    """The command keyword of a message, lower-cased — ``/Help@bot foo`` -> ``help``.
+    Returns None when the text isn't a slash-command."""
+    if not text or not text.startswith("/"):
+        return None
+    token = text.split(maxsplit=1)[0]  # drop args
+    return token[1:].split("@", 1)[0].lower() or None  # drop leading / and @botname
+
 
 class AdminGateMiddleware(BaseMiddleware):
     """Refuses to process group commands until the bot is an administrator.
@@ -32,6 +47,11 @@ class AdminGateMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         if not isinstance(event, Message) or event.chat.type not in GROUP_TYPES:
+            return await handler(event, data)
+
+        # Pure info commands (/help) bypass the gate — checked before touching the
+        # uow/bot so an un-onboarded or unpromoted group can still get oriented.
+        if _command_name(event.text) in _GATE_BYPASS_COMMANDS:
             return await handler(event, data)
 
         uow: UnitOfWork = data["uow"]
