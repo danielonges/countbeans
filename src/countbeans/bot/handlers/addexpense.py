@@ -231,6 +231,15 @@ async def cmd_addexpense(
             "too, @mention your own handle to be added."
         )
 
+    # Active events are "sticky": this expense auto-tagged to the event, and
+    # logging a *general* expense needs /event pause (admin-only). Say so, so a
+    # non-admin isn't left wondering why their expense landed on the event tab.
+    if active is not None:
+        lines.append(
+            "\nℹ️ To record a general (non-event) expense instead, an admin can "
+            "/event pause first."
+        )
+
     await message.reply("\n".join(lines))
     logger.info(
         "Expense recorded: expense_id=%s amount_cents=%d participants=%d",

@@ -164,6 +164,8 @@ async def test_addexpense_uses_event_default_currency(
         session=session,
     )
     assert 'Added to "Bali"' in (bot.last_reply or "")
+    # Sticky active event: the reply nudges that a general expense needs a pause.
+    assert "/event pause" in (bot.last_reply or "")
     expense = (await session.execute(select(Expense))).scalar_one()
     assert expense.currency == "IDR"
 
