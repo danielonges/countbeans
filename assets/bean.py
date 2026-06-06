@@ -202,7 +202,7 @@ for x, y in smile:
 
 # ---------- upscale nearest neighbor ----------
 pim = Image.fromarray(img, "RGBA")
-big = pim.resize((W * SCALE, H * SCALE), Image.NEAREST)
+big = pim.resize((W * SCALE, H * SCALE), Image.Resampling.NEAREST)
 big.save(path("countbeans_pfp.png"))
 
 # transparent version (no bg/frame): rebuild without background
@@ -213,13 +213,17 @@ for y in range(H):
         px = tuple(img2[y, x][:3])
         if px in (PAL["bg"], PAL["bg2"], PAL["frame"]):
             img2[y, x] = (0, 0, 0, 0)
-trans = Image.fromarray(img2, "RGBA").resize((W * SCALE, H * SCALE), Image.NEAREST)
+trans = Image.fromarray(img2, "RGBA").resize(
+    (W * SCALE, H * SCALE), Image.Resampling.NEAREST
+)
 trans.save(path("countbeans_pfp_transparent.png"))
 
 # ---------- extra exports ----------
 # 512px square (framed) + 512px transparent
-big.resize((512, 512), Image.NEAREST).save(path("countbeans_pfp_512.png"))
-trans.resize((512, 512), Image.NEAREST).save(path("countbeans_pfp_transparent_512.png"))
+big.resize((512, 512), Image.Resampling.NEAREST).save(path("countbeans_pfp_512.png"))
+trans.resize((512, 512), Image.Resampling.NEAREST).save(
+    path("countbeans_pfp_transparent_512.png")
+)
 
 
 # ---------- circular avatar (Telegram round mask) ----------
@@ -231,7 +235,7 @@ def make_circle(size):
     d.ellipse([pad, pad, size - 1 - pad, size - 1 - pad], fill=PAL["bg"] + (255,))
     # paste the bean (transparent sprite), scaled to ~82% and centred a touch high
     bw = int(size * 0.82) // SCALE * SCALE  # keep an integer pixel multiple → crisp
-    sprite = Image.fromarray(img2, "RGBA").resize((bw, bw), Image.NEAREST)
+    sprite = Image.fromarray(img2, "RGBA").resize((bw, bw), Image.Resampling.NEAREST)
     off = ((size - bw) // 2, (size - bw) // 2 - size // 40)
     canvas.alpha_composite(sprite, off)
     # circular frame ring on top
