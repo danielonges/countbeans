@@ -134,16 +134,13 @@ async def cmd_addexpense(
         for e in (message.entities or [])
         if e.type == MessageEntityType.TEXT_MENTION and e.user is not None
     ]
-    participants = await resolve_participants(
-        uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
-    )
-
     # Safety net: uneven-split suffixes (@alice:40, @bob:60%, @alice:2x) aren't
     # implemented yet — the mention regex stops at the ':' and would silently drop
     # the suffix, recording an EQUAL split with a ✅ (a silent money error). Until
     # uneven splits land (deferred Should-have), reject instead. Scanned on `rest`
     # (the mention region after the quoted description was removed), so a ':' inside
-    # the description doesn't trip it.
+    # the description doesn't trip it. Checked *before* resolve_participants so a
+    # rejected command never creates placeholder users / roster rows as a side effect.
     if has_split_suffix(rest):
         await message.reply(
             "Uneven splits (e.g. @alice:40, @bob:60%, @alice:2x) aren't supported "
@@ -151,6 +148,10 @@ async def cmd_addexpense(
             "an equal split."
         )
         return
+
+    participants = await resolve_participants(
+        uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
+    )
 
     try:
         cmd = AddExpenseCommand(
