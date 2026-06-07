@@ -423,6 +423,74 @@ async def test_other_user_cannot_drive_draft(dispatcher, session: AsyncSession) 
     assert await _expense_count(session) == 1
 
 
+# --- crafted-callback hardening --------------------------------------------
+
+
+async def test_malformed_participant_index_is_ignored(
+    dispatcher, session: AsyncSession
+) -> None:
+    # callback_data normally comes from bot-rendered buttons, but a crafted tap
+    # with a non-numeric or out-of-range index must not raise (ValueError on int())
+    # or seed `selected` with an index that later IndexErrors at submit.
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="20")
+
+    await feed_callback(dispatcher, bot, make_tap("ax:p:abc"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:p:99"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:pg:xyz"), session=session)
+
+    # The draft is intact: both real members are still selected and it confirms.
+    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    assert await _expense_count(session) == 1
+    assert set(await _shares_by_username(session)) == {"alice", "bob"}
+
+
+async def test_malformed_share_index_is_ignored(
+    dispatcher, session: AsyncSession
+) -> None:
+    # The s: branch looks up data["roster"][idx]; a crafted non-numeric index must
+    # be parsed defensively rather than crashing on int().
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="30")
+    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:m:percent"), session=session)
+
+    sent_before = len(bot.sent)
+    await feed_callback(dispatcher, bot, make_tap("ax:s:abc"), session=session)
+    assert len(bot.sent) == sent_before  # no share prompt sent, no crash
+    assert await _expense_count(session) == 0
+
+
+async def test_confirm_is_guarded_against_double_submit(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A double-tapped Confirm must not record the expense twice in the append-only
+    # ledger. The second callback sees the `submitting` flag the first set and
+    # bails. The harness is sequential, so simulate an in-flight first submit by
+    # pre-setting the flag, then feed the second tap.
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="20")
+    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
+
+    storage = dispatcher.storage
+    key = next(iter(storage.storage))  # the single live draft (alice)
+    data = await storage.get_data(key)
+    data["submitting"] = True
+    await storage.set_data(key, data)
+
+    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    assert await _expense_count(session) == 0  # guarded — no duplicate write
+
+
 # --- events / #general parity ----------------------------------------------
 
 

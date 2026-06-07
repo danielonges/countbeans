@@ -328,7 +328,13 @@ async def on_wizard_action(
         return
 
     if action.startswith("p:"):
-        idx = int(action[2:])
+        idx = _action_index(action, "p:")
+        # Reject a malformed or out-of-range index from a crafted callback, so a
+        # bad toggle can't seed `selected` with an index that later IndexErrors in
+        # _submit / the renderers.
+        if idx is None or not 0 <= idx < len(data.get("roster", [])):
+            await callback.answer()
+            return
         selected = list(data.get("selected", []))
         if idx in selected:
             selected.remove(idx)
@@ -338,7 +344,11 @@ async def on_wizard_action(
         return
 
     if action.startswith("pg:"):
-        await _roster_repaint(callback, bot, chat_id, state, page=int(action[3:]))
+        page = _action_index(action, "pg:")
+        if page is None or page < 0:
+            await callback.answer()
+            return
+        await _roster_repaint(callback, bot, chat_id, state, page=page)
         return
 
     if action == "pdone":
@@ -375,8 +385,10 @@ async def on_wizard_action(
         return
 
     if action.startswith("s:"):
-        idx = int(action[2:])
-        if idx not in data.get("selected", []):
+        idx = _action_index(action, "s:")
+        # `idx in selected` also bounds it to a valid roster index (selected only
+        # ever holds in-range indices — see the p: guard above).
+        if idx is None or idx not in data.get("selected", []):
             await callback.answer()
             return
         member = data["roster"][idx]
@@ -412,6 +424,11 @@ async def _submit(
     chat_id: int,
 ) -> None:
     data = await state.get_data()
+    # One write per draft: a double-tapped Confirm must not record the expense
+    # twice in the append-only ledger (the slot is claimed before the write below).
+    if data.get("submitting"):
+        await callback.answer()
+        return
     selected = data.get("selected", [])
     roster = data["roster"]
     if not selected:
@@ -449,6 +466,12 @@ async def _submit(
     event_id = _effective_event_id(data)
     participants = [uuid.UUID(roster[i]["user_id"]) for i in selected]
 
+    # Claim the write slot. MemoryStorage's get_data/update_data touch no real I/O,
+    # so nothing yields the event loop between the `submitting` guard read at the
+    # top and this set — a double-tapped Confirm's second callback is scheduled only
+    # once the first reaches `await add_expense`, by which point it sees the flag and
+    # bails. Reset on the pre-write failure paths so the user can fix and retry.
+    await state.update_data(submitting=True)
     try:
         cmd = AddExpenseCommand(
             group_id=uuid.UUID(data["group_id"]),
@@ -463,12 +486,14 @@ async def _submit(
             created_by=payer_id,
         )
     except Exception as exc:  # DTO validation
+        await state.update_data(submitting=False)
         await callback.answer(f"Invalid: {exc}", show_alert=True)
         return
 
     try:
         result = await add_expense(uow, cmd)
     except ValueError as exc:
+        await state.update_data(submitting=False)
         await callback.answer(str(exc), show_alert=True)
         return
 
@@ -733,6 +758,17 @@ def _is_reply_to_prompt(message: Message, data: dict[str, Any]) -> bool:
     to some other message (or a stale prompt) doesn't advance the step."""
     rtm = message.reply_to_message
     return rtm is not None and rtm.message_id == data.get("prompt_id")
+
+
+def _action_index(action: str, prefix: str) -> int | None:
+    """The integer index from a prefixed callback action (``p:3``, ``pg:2``,
+    ``s:1``), or ``None`` when it's malformed. callback_data normally comes from
+    bot-rendered buttons, but a crafted callback shouldn't raise — parse defensively
+    and let the caller bounds-check."""
+    try:
+        return int(action[len(prefix) :])
+    except ValueError:
+        return None
 
 
 def _mention_prefix(user: User | None) -> str:
