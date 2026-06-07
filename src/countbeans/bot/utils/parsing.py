@@ -33,6 +33,35 @@ def is_all_selector(args: Sequence[str]) -> bool:
     return bool(args) and is_all(args[0])
 
 
+# The reserved write-scope override keyword, in its own ``#``-prefixed namespace
+# (distinct from the ``@mention`` target family and the bare view-selector family
+# above — see CLAUDE.md "The #general write-scope override"). On /addexpense and
+# /settleup it forces THIS one write to the general (no-event) scope even while an
+# event is active — a one-off escape hatch that needs no /event pause and so can't
+# leave a forgotten-resume mis-filing later expenses. One spelling, one matcher,
+# so the two commands can never drift.
+GENERAL_KEYWORD = "general"
+
+# Whole-token, case-insensitive: ``#general`` bounded by start/whitespace on both
+# sides, so ``#generals`` or a ``#general`` glued to other text never matches.
+_GENERAL_FLAG_RE = re.compile(rf"(?i)(?<!\S)#{GENERAL_KEYWORD}(?!\S)")
+
+
+def extract_general_flag(text: str) -> tuple[str, bool]:
+    """Strip the reserved ``#general`` override token, returning
+    ``(remaining_text, present)``.
+
+    Matches the whole ``#general`` token (case-insensitive) anywhere in ``text``,
+    so it may sit before or after the @mentions. Callers run this on the region
+    *after* a quoted description has been removed, so a literal ``#general`` inside
+    quotes is preserved as description text rather than read as the override.
+    """
+    cleaned, n = _GENERAL_FLAG_RE.subn(" ", text)
+    if not n:
+        return text, False
+    return re.sub(r"\s{2,}", " ", cleaned).strip(), True
+
+
 # A participant token: ``@handle`` (equal) or ``@handle:<suffix>`` for an uneven
 # split — ``@a:30`` (exact cents), ``@a:60%`` (percentage), ``@a:2x`` (weight).
 # The suffix is any run of non-space, non-``@`` chars after the colon; its meaning

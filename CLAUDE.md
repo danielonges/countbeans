@@ -283,3 +283,34 @@ the `/addexpense` handler strips `@all` (via `is_all`) before calling
 "split everyone."** The service core never sees the literal `"all"`. A new
 command that needs "everyone" reuses these predicates rather than re-typing the
 string.
+
+### The `#general` write-scope override (command grammar)
+
+`#general` is the **one-off escape hatch from active-event mode**: on `/addexpense`
+and `/settleup`, adding it forces *that single write* to the general (no-event)
+scope even while an event is active — without `/event pause` (so no admin, and no
+forgotten-`resume` that would silently mis-file later trip expenses). For a *run*
+of general writes, `/event pause` is still the tool; `#general` is for one.
+
+Like `@all`, it has **one definition** — `GENERAL_KEYWORD` + `extract_general_flag`
+in `src/countbeans/bot/utils/parsing.py` — so the two commands can't drift. It is
+its own **`#`-prefixed namespace**, distinct from the `@mention` target family
+(`is_all`) and the bare view-selector family (`is_all_selector`). The matcher is
+whole-token and case-insensitive (`#generals` / glued text never match).
+
+**The bot layer is the sole interpreter**, exactly as with `@all`:
+
+- Each handler runs `extract_general_flag` on the args **after** a quoted
+  description is removed, so a literal `#general` inside quotes stays description
+  text. `/addexpense` strips it from the mention region before
+  `unquoted_description` / `parse_participants`; `/settleup` strips it before its
+  anchored grammar regexes match.
+- The flag collapses to **`event_id = None`** for that command — the service core
+  still only ever sees an `event_id` (a value or NULL) and knows nothing of the
+  keyword. Downstream the handler keys off the *effective* scope (`scoped_event`),
+  not the raw active event, so currency fallback, the coverage warning, and the
+  reply wording all behave as if no event were active.
+- The reply **confirms** an exercised override mid-event ("ℹ️ Logged as
+  general …") so a deliberate opt-out is visible — but there is **no per-reply
+  nudge on ordinary event expenses**; the scope echo is the signal, and the
+  `#general` hint lives in `/event info` and the command usage texts.

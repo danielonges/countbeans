@@ -21,6 +21,7 @@ from countbeans.bot.utils.formatting import (
     payer_excluded_from_named_split,
 )
 from countbeans.bot.utils.parsing import (
+    extract_general_flag,
     extract_quoted_description,
     parse_money,
     parse_participants,
@@ -48,7 +49,9 @@ _USAGE = (
     "“...”/‘...’ (curly, handy on phones), "
     "«...», or `...`. Escape a quote inside with a backslash: "
     '"she said \\"hi\\"".\n'
-    "• Prefix the amount with a currency to override the default: $50, €50, USD50."
+    "• Prefix the amount with a currency to override the default: $50, €50, USD50.\n"
+    "• While an event is active, add #general to log just this one expense to the "
+    "general (non-event) scope (no /event pause needed)."
 )
 
 
@@ -86,33 +89,46 @@ async def cmd_addexpense(
     active = (
         await uow.events.get(group.active_event_id) if group.active_event_id else None
     )
-    event_id = active.id if active else None
+
+    rest = " ".join(tokens[1:])
+
+    # Pull out an optional quoted description (any matching quote pair, escapes
+    # honored), then the reserved #general override, then scan whatever's left for
+    # @mentions — so neither an @/quote inside the description nor the flag is
+    # mistaken for a participant.
+    description, rest = extract_quoted_description(rest)
+    # #general forces THIS one expense to general (no-event) scope even while an
+    # event is active — a one-off escape hatch that needs no /event pause (CLAUDE.md
+    # "The #general write-scope override"). Stripped from the unquoted region only,
+    # so a literal #general inside a quoted description stays text.
+    rest, force_general = extract_general_flag(rest)
+    # No quoted description → fall back to the unquoted run of words between the
+    # amount and the first @mention (spec /addexpense rule 2), now also free of the
+    # #general flag. A quoted description always wins; `rest` is otherwise left
+    # untouched so @mentions still parse from it exactly as before (a standalone
+    # "USD" word becomes description, not a currency — the fused-marker rule on the
+    # amount token is unaffected).
+    if description is None:
+        description = unquoted_description(rest)
+
+    # The effective scope: the active event, unless #general overrode it for this
+    # command. event_id, the currency fallback, the reply head, and the coverage
+    # check all key off `scoped_event` (not `active`), so an override behaves
+    # exactly like "no active event".
+    scoped_event = None if force_general else active
+    event_id = scoped_event.id if scoped_event else None
 
     # The amount token may carry a currency marker ($50, €50, USD50); fall back to
-    # the active event's currency, then the group default. Mixed currencies are fine
-    # — balances derive per-currency (see CLAUDE.md "Deriving balances").
+    # the scoped event's currency, then the group default. Mixed currencies are
+    # fine — balances derive per-currency (see CLAUDE.md "Deriving balances").
     scope_currency = (
-        active.default_currency if active else None
+        scoped_event.default_currency if scoped_event else None
     ) or group.default_currency
     try:
         currency, amount_cents = parse_money(tokens[0], scope_currency)
     except ValueError:
         await message.reply("Invalid amount. Use a positive number like 25.50")
         return
-
-    rest = " ".join(tokens[1:])
-
-    # Pull out an optional quoted description (any matching quote pair, escapes
-    # honored), then scan whatever's left for @mentions — so an @ or quote inside
-    # the description is never mistaken for a participant.
-    description, rest = extract_quoted_description(rest)
-    # No quoted description → fall back to the unquoted run of words between the
-    # amount and the first @mention (spec /addexpense rule 2). A quoted
-    # description always wins; `rest` is left untouched so @mentions still parse
-    # from it exactly as before (a standalone "USD" word becomes description, not
-    # a currency — the fused-marker rule on the amount token is unaffected).
-    if description is None:
-        description = unquoted_description(rest)
     # Parse the @mention region into participants + split mode. @all is bot-grammar
     # for "split everyone" (parse_participants drops it → an empty handle list
     # *means* everyone). Uneven-split suffixes (@a:30, @a:60%, @a:2x) set the mode;
@@ -211,11 +227,11 @@ async def cmd_addexpense(
 
     # Every scoped reply echoes the scope so a "sticky" active event can't quietly
     # mis-file an expense (CLAUDE.md "Events"). General tracking keeps its wording.
-    if active is not None:
+    if scoped_event is not None:
         head = (
-            f'✅ Added to "{active.name}": {description} — {format_money(result.amount_cents, result.currency)}'
+            f'✅ Added to "{scoped_event.name}": {description} — {format_money(result.amount_cents, result.currency)}'
             if description
-            else f'✅ Added to "{active.name}" — {format_money(result.amount_cents, result.currency)}'
+            else f'✅ Added to "{scoped_event.name}" — {format_money(result.amount_cents, result.currency)}'
         )
     else:
         head = (
@@ -242,8 +258,9 @@ async def cmd_addexpense(
 
     # When splitting the whole group, warn if the bot can't see everyone — it can
     # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside
-    # an event, @all means the roster (an intentional subset), so this gate is skipped.
-    if active is None and not named and not mentioned:
+    # an event, @all means the roster (an intentional subset), so this gate is
+    # skipped — but a #general override is a whole-group general split, so it warns.
+    if scoped_event is None and not named and not mentioned:
         try:
             actual = (
                 await bot.get_chat_member_count(message.chat.id) - 1
@@ -273,14 +290,12 @@ async def cmd_addexpense(
             "too, @mention your own handle to be added."
         )
 
-    # Active events are "sticky": this expense auto-tagged to the event, and
-    # logging a *general* expense needs /event pause (admin-only). Say so, so a
-    # non-admin isn't left wondering why their expense landed on the event tab.
-    if active is not None:
-        lines.append(
-            "\nℹ️ To record a general (non-event) expense instead, an admin can "
-            "/event pause first."
-        )
+    # A #general override while an event is active: confirm it stayed general so a
+    # deliberate escape-hatch use is visible (the head already omits the event).
+    # No per-reply nudge on ordinary event expenses — the scope echo above is the
+    # signal, and #general is the one-step way to opt out (CLAUDE.md "Events").
+    if force_general and active is not None:
+        lines.append(f'\nℹ️ Logged as general — not tagged to "{active.name}".')
 
     await message.reply("\n".join(lines))
     logger.info(

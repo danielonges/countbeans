@@ -34,7 +34,11 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from countbeans.bot.utils.formatting import display_name, format_money
-from countbeans.bot.utils.parsing import is_all, parse_amount_cents
+from countbeans.bot.utils.parsing import (
+    extract_general_flag,
+    is_all,
+    parse_amount_cents,
+)
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.db.models import Group, User
 from countbeans.dto.commands import SettleUpCommand
@@ -58,7 +62,9 @@ _USAGE = (
     "       /settleup @from @to [amount]   (admins — record a pair's payment)\n"
     "       /settleup @all                 (admins — settle the whole group)\n"
     "Example: /settleup @alice 25.50\n"
-    "Omit the amount to settle the full outstanding debt."
+    "Omit the amount to settle the full outstanding debt.\n"
+    "While an event is active, add #general to settle a general (non-event) debt "
+    "instead (no /event pause needed)."
 )
 
 
@@ -70,27 +76,51 @@ async def cmd_settleup(
         return
 
     args = (command.args or "").strip()
+    # #general forces THIS settlement to general (no-event) scope even while an
+    # event is active — the one-off counterpart to /event pause, with no mode flip
+    # (CLAUDE.md "The #general write-scope override"). Strip it before the grammar
+    # regexes (which anchor on the whole args string) try to match.
+    args, force_general = extract_general_flag(args)
 
     group = await uow.groups.upsert(
         telegram_chat_id=message.chat.id,
         group_name=getattr(message.chat, "title", None),
     )
 
-    # Active-event mode: settle within the active event's scope (writes are
-    # strictly active-scoped — /event pause to settle a general debt). CLAUDE.md.
+    # Active-event mode: settle within the active event's scope unless #general
+    # overrode it for this command (writes are otherwise strictly active-scoped).
+    # event_id, scope_note, and the currency fallback all key off `scoped_event`.
     active = (
         await uow.events.get(group.active_event_id) if group.active_event_id else None
     )
-    event_id = active.id if active else None
-    scope_note = f' in "{active.name}"' if active else ""
-    currency = (active.default_currency if active else None) or group.default_currency
+    scoped_event = None if force_general else active
+    event_id = scoped_event.id if scoped_event else None
+    scope_note = f' in "{scoped_event.name}"' if scoped_event else ""
+    currency = (
+        scoped_event.default_currency if scoped_event else None
+    ) or group.default_currency
+    # Shown after a successful general override mid-event, so a deliberate
+    # escape-hatch use is visible (the scope_note above is empty in that case).
+    general_note = (
+        f'\nℹ️ Recorded as general — not in "{active.name}".'
+        if force_general and active is not None
+        else ""
+    )
 
     # Two handles → admin records a settlement for a pair (e.g. a departed
     # member). Tried before the single-handle form, which it would also match.
     pair = _PAIR_ARGS_RE.match(args)
     if pair:
         await _settle_on_behalf(
-            message, bot, uow, group, event_id, scope_note, currency, *pair.groups()
+            message,
+            bot,
+            uow,
+            group,
+            event_id,
+            scope_note,
+            general_note,
+            currency,
+            *pair.groups(),
         )
         return
 
@@ -105,7 +135,14 @@ async def cmd_settleup(
     # @all — settle the whole scope at once. Admin-only and amount-less.
     if is_all(target_username):
         await _settle_whole_group(
-            message, bot, uow, group.id, group.simplify_debts, event_id, scope_note
+            message,
+            bot,
+            uow,
+            group.id,
+            group.simplify_debts,
+            event_id,
+            scope_note,
+            general_note,
         )
         return
 
@@ -161,7 +198,7 @@ async def cmd_settleup(
     await message.reply(
         f"Settled up{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{format_money(result.amount_cents, result.currency)}{auto_note}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}{general_note}"
     )
     logger.info(
         "Settlement recorded: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -180,6 +217,7 @@ async def _settle_on_behalf(
     group: Group,
     event_id: uuid.UUID | None,
     scope_note: str,
+    general_note: str,
     currency: str,
     from_handle: str,
     to_handle: str,
@@ -275,7 +313,7 @@ async def _settle_on_behalf(
     await message.reply(
         f"Recorded{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{format_money(result.amount_cents, result.currency)}{auto_note}.{confirm}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}.{confirm}{general_note}"
     )
     logger.info(
         "On-behalf settlement by admin=%s: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -385,6 +423,7 @@ async def _settle_whole_group(
     simplify_debts: bool,
     event_id: uuid.UUID | None,
     scope_note: str,
+    general_note: str,
 ) -> None:
     """/settleup @all — record every suggested transfer to zero the scope.
 
@@ -422,7 +461,7 @@ async def _settle_whole_group(
         lines.append(
             f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {format_money(r.amount_cents, r.currency)}"
         )
-    await message.reply("\n".join(lines))
+    await message.reply("\n".join(lines) + general_note)
     logger.info(
         "Group settle-up by user=%s in group=%s: %d settlements",
         message.from_user.id,

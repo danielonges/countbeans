@@ -6,7 +6,8 @@ whole group, so it isn't a single member's call. Viewing (info, or bare /event)
 is open to any member.
   /event new "<name>"    (admin) start an event (one open at a time); new
                          /addexpense & /settleup auto-tag to it until paused/closed
-  /event pause           (admin) stop auto-tagging (log a general expense); stays open
+  /event pause           (admin) stop auto-tagging for a run of general expenses; stays
+                         open. For just one, use /addexpense … #general (no pause)
   /event resume          (admin) resume auto-tagging to the open event
   /event close           (admin) finish the open event, freeing the slot
   /event add @user       (admin) add someone to the roster (@all adds the whole group)
@@ -58,11 +59,12 @@ _USAGE = (
     "Manage an event scope:\n"
     '• /event new "<name>" [CUR] — start an event (new expenses tag to it)\n'
     "• /event info — show the open event's status, roster, and outstanding balance\n"
-    "• /event pause — log a general expense without ending the event\n"
+    "• /event pause — stop tagging so new expenses are general (for a run of them)\n"
     "• /event resume — resume tagging to the open event\n"
     "• /event close — finish the open event\n"
     "• /event add @user / remove @user — edit the roster\n"
     "Inside an event, @all (or no mentions) splits the roster, not the whole group.\n"
+    "Just one general expense? Add #general to /addexpense — no pause needed.\n"
     "Managing an event is admin-only; anyone can view it."
 )
 
@@ -392,6 +394,12 @@ async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
         else "/event pause • /event close"
     )
     lines.append(hints)
+    # One-off general expense mid-event: #general beats pausing (no admin, no
+    # forgotten resume). Surfaced here rather than nudged on every expense reply.
+    if is_active:
+        lines.append(
+            'General (non-event) item? Add #general, e.g. /addexpense 12 "taxi" #general.'
+        )
     await message.reply("\n".join(lines))
 
 

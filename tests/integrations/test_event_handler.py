@@ -39,6 +39,7 @@ async def test_event_info_shows_status_roster_outstanding(
     assert "active" in reply
     assert "caller" in reply  # roster
     assert "IDR 1000.00" in reply  # bob owes caller half of 2000.00
+    assert "#general" in reply  # active event surfaces the one-off general path
 
 
 async def test_event_info_paused_state(dispatcher, session: AsyncSession) -> None:
@@ -164,8 +165,9 @@ async def test_addexpense_uses_event_default_currency(
         session=session,
     )
     assert 'Added to "Bali"' in (bot.last_reply or "")
-    # Sticky active event: the reply nudges that a general expense needs a pause.
-    assert "/event pause" in (bot.last_reply or "")
+    # No per-reply pause nudge on an ordinary event expense — the scope echo above
+    # is the signal, and #general is the one-step opt-out (CLAUDE.md "Events").
+    assert "/event pause" not in (bot.last_reply or "")
     expense = (await session.execute(select(Expense))).scalar_one()
     assert expense.currency == "IDR"
 
@@ -419,6 +421,88 @@ async def test_settleup_auto_tags_active_event(
     assert "Trip" in reply  # scope echoed
     settlement = (await session.execute(select(Settlement))).scalar_one()
     assert settlement.event_id == ev.event_id
+
+
+async def test_addexpense_general_override_tags_general(
+    dispatcher, session: AsyncSession
+) -> None:
+    """#general forces a single expense to general scope while an event is active —
+    no event tag, general reply wording, and a note confirming it stayed general."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Bali")
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            '/addexpense 30 "Lunch" #general @bob', from_id=1001, username="creator"
+        ),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert 'Added to "Bali"' not in reply  # not tagged to the active event
+    assert "Added expense" in reply  # general wording
+    assert "Logged as general" in reply  # override confirmed
+    expense = (await session.execute(select(Expense))).scalar_one()
+    assert expense.event_id is None
+
+
+async def test_addexpense_general_flag_without_event_is_noop(
+    dispatcher, session: AsyncSession
+) -> None:
+    """#general with no active event: a harmless flag — the token is stripped from
+    the description and no 'logged as general' note appears (nothing to opt out of)."""
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=1001, username="creator")
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            "/addexpense 30 Lunch #general @bob", from_id=1001, username="creator"
+        ),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert "Added expense" in reply
+    assert "#general" not in reply  # stripped from the description
+    assert "Logged as general" not in reply
+    expense = (await session.execute(select(Expense))).scalar_one()
+    assert expense.event_id is None
+
+
+async def test_settleup_general_override_settles_general(
+    dispatcher, session: AsyncSession
+) -> None:
+    """#general settles a general debt while an event is active — the settlement is
+    tagged general, not to the event."""
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    # General debt: bob fronts 10 split caller+bob → caller owes bob 5 in general.
+    await seed_expense(
+        session, group, payer=bob, participants=[caller, bob], amount_cents=1000
+    )
+    # An active event whose (empty) scope must NOT capture the settlement.
+    await seed_event(session, group, creator=caller, name="Trip")
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob #general", from_id=1001, username="caller"),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert "Settled up" in reply
+    assert "Recorded as general" in reply  # override confirmed
+    settlement = (await session.execute(select(Settlement))).scalar_one()
+    assert settlement.event_id is None
 
 
 async def test_balance_scoped_to_active_event(
