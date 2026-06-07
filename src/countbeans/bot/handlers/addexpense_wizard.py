@@ -37,6 +37,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    User,
 )
 
 from countbeans.bot.utils.formatting import (
@@ -129,13 +130,17 @@ async def start_wizard(message: Message, state: FSMContext, uow: UnitOfWork) -> 
             "page": 0,
         }
     )
-    await message.answer(
+    # Sent as a *reply* to /addexpense so ForceReply(selective=True) targets the
+    # caller and the reply box pops (a plain send targets nobody). The prompt is
+    # kept, but its id is tracked as the reply target the amount step accepts.
+    prompt = await message.reply(
         "💰 New expense — how much?\n"
-        "Send the amount, optionally with a description — e.g.\n"
+        "Reply to this message with the amount, optionally a description — e.g.\n"
         "    50.25 1 night at Domino's\n"
         "Prefix a currency to override: $50, €50, USD50. Or /cancel to abort.",
         reply_markup=ForceReply(selective=True),
     )
+    await state.update_data(prompt_id=prompt.message_id)
 
 
 # ---------------------------------------------------------------------------
@@ -143,27 +148,32 @@ async def start_wizard(message: Message, state: FSMContext, uow: UnitOfWork) -> 
 # ---------------------------------------------------------------------------
 
 
-# Free-text steps match the initiator's next non-command **text** while in that
-# state — whether they used the ForceReply box or just typed (this bot can read
-# plain group messages; even where privacy mode hides them, the ForceReply reply
-# still arrives and matches). The command exclusion lets /cancel & co. fall
-# through. FSM state is keyed per (chat, user), so only the initiator's text lands
-# here — no explicit owner check needed.
-_TEXT_INPUT = F.text & ~F.text.startswith("/")
+# Free-text steps only fire on a *direct reply* to the bot's prompt, so ordinary
+# group chatter (this bot can read all group messages) never interrupts the
+# wizard. The handler then checks the reply targets the *current* prompt
+# (_is_reply_to_prompt). The command exclusion lets /cancel & co. through; FSM
+# state is keyed per (chat, user), so only the initiator's reply lands here.
+_TEXT_INPUT = F.text & ~F.text.startswith("/") & F.reply_to_message
 
 
 @router.message(AddExpenseFlow.amount, _TEXT_INPUT)
-async def on_amount(message: Message, state: FSMContext, uow: UnitOfWork) -> None:
+async def on_amount(
+    message: Message, state: FSMContext, uow: UnitOfWork, bot: Bot
+) -> None:
     data = await state.get_data()
+    if not _is_reply_to_prompt(message, data):
+        return
     text = (message.text or "").strip()
     tokens = text.split()
     if not tokens:
-        await _reprompt(message, "Send an amount like 25.50.")
+        await _amount_reprompt(message, state, "Send an amount like 25.50.")
         return
     try:
         currency, amount_cents = parse_money(tokens[0], data["currency_default"])
     except ValueError:
-        await _reprompt(message, "Invalid amount. Send a positive number like 25.50.")
+        await _amount_reprompt(
+            message, state, "Invalid amount. Send a positive number like 25.50."
+        )
         return
     # Anything after the amount is an optional description — `50.25 dinner at
     # Domino's`. The description can be edited later via the 📝 button.
@@ -171,31 +181,43 @@ async def on_amount(message: Message, state: FSMContext, uow: UnitOfWork) -> Non
     await state.update_data(
         amount_cents=amount_cents, currency=currency, description=description
     )
-    await _open_participants(message, state, uow)
+    # The opening prompt is kept, so the reply to it is kept too (symmetry); just
+    # post the anchor below. Later steps (description/share) do drop the reply.
+    await _open_participants(bot, message, state, uow)
 
 
 @router.message(AddExpenseFlow.description, _TEXT_INPUT)
 async def on_description(message: Message, state: FSMContext, bot: Bot) -> None:
+    if not _is_reply_to_prompt(message, await state.get_data()):
+        return
     await state.update_data(description=(message.text or "").strip() or None)
     await state.set_state(AddExpenseFlow.participants)
-    await _repaint(bot, message.chat.id, state)
+    await _drop_user_reply(bot, message)
+    await _clear_prompt(bot, message.chat.id, state)
+    await _resend_anchor(bot, message.chat.id, state)
 
 
 @router.message(AddExpenseFlow.share_entry, _TEXT_INPUT)
 async def on_share(message: Message, state: FSMContext, bot: Bot) -> None:
     data = await state.get_data()
+    if not _is_reply_to_prompt(message, data):
+        return
     idx = data.get("pending_share_idx")
     if idx is None:
         return  # no member is awaiting a share — ignore stray text
     try:
         value = _parse_share((message.text or "").strip(), data["split_mode"])
     except ValueError as exc:
-        await message.reply(str(exc), reply_markup=ForceReply(selective=True))
+        # Re-ask the same member (pending_share_idx stays); drop the bad reply.
+        await _drop_user_reply(bot, message)
+        await _reask(bot, message, state, str(exc))
         return
     shares = dict(data.get("shares", {}))
     shares[str(idx)] = value
     await state.update_data(shares=shares, pending_share_idx=None)
-    await _repaint(bot, message.chat.id, state)
+    await _drop_user_reply(bot, message)
+    await _clear_prompt(bot, message.chat.id, state)
+    await _resend_anchor(bot, message.chat.id, state)
 
 
 # ---------------------------------------------------------------------------
@@ -258,11 +280,13 @@ async def on_wizard_action(
         return
 
     if action == "desc":
-        await bot.send_message(
+        prompt = await bot.send_message(
             chat_id,
-            "📝 Send a short description for this expense.",
+            f"{_mention_prefix(callback.from_user)}📝 Send a short description "
+            "for this expense.",
             reply_markup=ForceReply(selective=True),
         )
+        await state.update_data(prompt_id=prompt.message_id)
         await state.set_state(AddExpenseFlow.description)
         await callback.answer()
         return
@@ -359,13 +383,14 @@ async def on_wizard_action(
             "percent": "e.g. 60 for 60%",
             "weighted": "e.g. 2 for 2x",
         }[data["split_mode"]]
-        await bot.send_message(
+        prompt = await bot.send_message(
             chat_id,
-            f"Share for {display_name(member['username'], member['first_name'])} "
+            f"{_mention_prefix(callback.from_user)}Share for "
+            f"{display_name(member['username'], member['first_name'])} "
             f"— send a number ({hint}).",
             reply_markup=ForceReply(selective=True),
         )
-        await state.update_data(pending_share_idx=idx)
+        await state.update_data(prompt_id=prompt.message_id, pending_share_idx=idx)
         await callback.answer()
         return
 
@@ -707,10 +732,50 @@ _RENDERERS = {
 # ---------------------------------------------------------------------------
 
 
-async def _reprompt(message: Message, text: str) -> None:
-    await message.answer(
+def _is_reply_to_prompt(message: Message, data: dict[str, Any]) -> bool:
+    """True only when the message replies to the bot's *current* prompt, so a reply
+    to some other message (or a stale prompt) doesn't advance the step."""
+    rtm = message.reply_to_message
+    return rtm is not None and rtm.message_id == data.get("prompt_id")
+
+
+def _mention_prefix(user: User | None) -> str:
+    """A leading @mention so ForceReply(selective=True) targets the initiator and
+    the reply box pops on a callback-triggered prompt (which has no message to
+    reply to). Empty when they have no public @username — then the box won't
+    auto-pop and they swipe-reply (the opening/re-ask prompts pop via reply)."""
+    return f"@{user.username} " if user and user.username else ""
+
+
+async def _ask(message: Message, text: str) -> Message:
+    """Send a ForceReply prompt as a *reply* to the user's message, so
+    ForceReply(selective=True) targets them and the box pops. Returns the sent
+    message so a caller can record its id for deletion."""
+    return await message.reply(
         f"{text} Or send /cancel to abort.", reply_markup=ForceReply(selective=True)
     )
+
+
+async def _amount_reprompt(message: Message, state: FSMContext, text: str) -> None:
+    """Re-ask for the amount, making the fresh prompt the new reply target. Nothing
+    is deleted — the kept opening prompt stays, and the ForceReply box points the
+    user at this latest ask."""
+    sent = await _ask(message, text)
+    await state.update_data(prompt_id=sent.message_id)
+
+
+async def _reask(bot: Bot, message: Message, state: FSMContext, text: str) -> None:
+    """Re-ask after bad input on the share step, whose reply the caller has already
+    dropped. We can't `message.reply` to a deleted message, so target the user with
+    an @mention (as the share prompt itself does) to pop the box; replaces the live
+    prompt."""
+    await _clear_prompt(bot, message.chat.id, state)
+    prompt = await bot.send_message(
+        message.chat.id,
+        f"{_mention_prefix(message.from_user)}{text} Or send /cancel to abort.",
+        reply_markup=ForceReply(selective=True),
+    )
+    await state.update_data(prompt_id=prompt.message_id)
 
 
 def _description_from_rest(rest: str) -> str | None:
@@ -730,16 +795,15 @@ def _description_from_rest(rest: str) -> str | None:
 
 
 async def _open_participants(
-    message: Message, state: FSMContext, uow: UnitOfWork
+    bot: Bot, message: Message, state: FSMContext, uow: UnitOfWork
 ) -> None:
-    """First view with an anchor: load the roster, select everyone, post the
-    anchor message, and remember its id for in-place edits."""
+    """Leave the amount step: load the roster (everyone selected) and post the
+    first anchor below the (kept) opening prompt. The opening prompt isn't deleted;
+    we just stop tracking it as a reply target."""
     await _reload_roster(state, uow)
     await state.set_state(AddExpenseFlow.participants)
-    data = await state.get_data()
-    text, kb = _render_participants(data)
-    anchor = await message.answer(text, reply_markup=kb)
-    await state.update_data(anchor_id=anchor.message_id)
+    await state.update_data(prompt_id=None)
+    await _resend_anchor(bot, message.chat.id, state)
 
 
 async def _reload_roster(state: FSMContext, uow: UnitOfWork) -> None:
@@ -787,6 +851,52 @@ async def _edit_anchor(
     except TelegramBadRequest:
         # "message is not modified" (e.g. a re-tap on the same toggle). Harmless.
         logger.debug("wizard anchor edit skipped (not modified)")
+
+
+async def _safe_delete(bot: Bot, chat_id: int, message_id: int) -> None:
+    """Delete a message, ignoring failures. Own messages always delete; deleting a
+    *user's* message needs the bot's 'Delete messages' admin right and raises
+    TelegramBadRequest without it — best-effort, so a clean thread degrades to a
+    tidy-enough one rather than an error."""
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except TelegramBadRequest:
+        logger.debug("wizard message delete skipped (%s)", message_id)
+
+
+async def _drop_user_reply(bot: Bot, message: Message) -> None:
+    """Best-effort remove the user's own reply, so a processed step leaves only the
+    refreshed anchor (needs the bot's 'Delete messages' right; skipped otherwise)."""
+    await _safe_delete(bot, message.chat.id, message.message_id)
+
+
+async def _clear_prompt(bot: Bot, chat_id: int, state: FSMContext) -> None:
+    """Remove the ForceReply prompt the user just answered (the bot's own message)."""
+    prompt_id = (await state.get_data()).get("prompt_id")
+    if prompt_id is not None:
+        await _safe_delete(bot, chat_id, prompt_id)
+        await state.update_data(prompt_id=None)
+
+
+async def _resend_anchor(bot: Bot, chat_id: int, state: FSMContext) -> None:
+    """Replace the anchor with a fresh copy at the bottom of the chat.
+
+    Used after a *reply* step (amount / description / share) so the update lands
+    as a NEW message the user can't miss, rather than a silent in-place edit
+    above their reply. Button steps still edit in place (see ``_repaint``) so the
+    keyboard doesn't jump on every tap. Only the bot's own messages are deleted —
+    the user's reply is left untouched.
+    """
+    data = await state.get_data()
+    renderer = _RENDERERS.get(await state.get_state() or "")
+    if renderer is None:
+        return
+    text, kb = renderer(data)
+    old_anchor = data.get("anchor_id")
+    if old_anchor is not None:
+        await _safe_delete(bot, chat_id, old_anchor)
+    sent = await bot.send_message(chat_id, text, reply_markup=kb)
+    await state.update_data(anchor_id=sent.message_id)
 
 
 def _parse_share(raw: str, mode: str) -> int:

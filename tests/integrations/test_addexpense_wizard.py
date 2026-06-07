@@ -52,9 +52,8 @@ async def _start_to_roster(
     dispatcher, bot: MockedBot, session: AsyncSession, *, amount: str
 ) -> None:
     """Drive the wizard from a bare /addexpense through the amount step, leaving
-    the anchor on the participant roster. The amount is sent as a **plain typed
-    message** (no reply) — the realistic path for a bot that can read group
-    messages, and the regression that the reply-only filter used to drop."""
+    the anchor on the participant roster. Free-text steps are reply-only, so the
+    amount is sent as a reply to the prompt (message_id 999 in the harness)."""
     await feed(
         dispatcher,
         bot,
@@ -64,7 +63,7 @@ async def _start_to_roster(
     await feed(
         dispatcher,
         bot,
-        make_message(amount, from_id=1001),
+        make_message(amount, from_id=1001, reply_to_message_id=999),
         session=session,
     )
 
@@ -102,7 +101,9 @@ async def test_amount_line_accepts_inline_description(
     await feed(
         dispatcher,
         bot,
-        make_message("50.25 1 night at domino's pizza", from_id=1001),
+        make_message(
+            "50.25 1 night at domino's pizza", from_id=1001, reply_to_message_id=999
+        ),
         session=session,
     )
     assert "For: 1 night at domino's pizza" in (bot.last_reply or "")
@@ -127,10 +128,89 @@ async def test_amount_line_strips_wrapping_quotes(
         session=session,
     )
     await feed(
-        dispatcher, bot, make_message('12 "team dinner"', from_id=1001), session=session
+        dispatcher,
+        bot,
+        make_message('12 "team dinner"', from_id=1001, reply_to_message_id=999),
+        session=session,
     )
     # The wrapping quotes are stripped — "For: team dinner", not 'For: "team dinner"'.
     assert "For: team dinner" in (bot.last_reply or "")
+
+
+async def test_amount_step_keeps_prompt_and_reply(
+    dispatcher, session: AsyncSession
+) -> None:
+    # The opening prompt is kept, so the reply to it is kept too (symmetry) — the
+    # amount step deletes nothing; the anchor posts below.
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/addexpense", from_id=1001, username="alice"),
+        session=session,
+    )
+    await feed(
+        dispatcher,
+        bot,
+        make_message("25", from_id=1001, reply_to_message_id=999),
+        session=session,
+    )
+    assert bot.deleted == []  # nothing deleted at the opening step
+    assert "Who's in?" in (bot.last_reply or "")
+
+
+async def test_non_reply_chatter_does_not_advance(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A message that isn't a reply to the prompt is ignored — ordinary group
+    # chatter can't hijack the wizard's free-text step.
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/addexpense", from_id=1001, username="alice"),
+        session=session,
+    )
+    sent_before = len(bot.sent)
+    await feed(dispatcher, bot, make_message("haha ok", from_id=1001), session=session)
+    assert len(bot.sent) == sent_before  # not a reply → nothing happened
+    assert await _expense_count(session) == 0
+    # A proper reply to the prompt advances the step.
+    await feed(
+        dispatcher,
+        bot,
+        make_message("25", from_id=1001, reply_to_message_id=999),
+        session=session,
+    )
+    assert "Who's in?" in (bot.last_reply or "")
+
+
+async def test_subsequent_reply_step_deletes_prompt_and_resends_anchor(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A *subsequent* reply step (here the 📝 Description prompt) deletes the bot's
+    # prompt and re-sends the anchor as a fresh message, rather than editing in
+    # place — clear feedback that the input was received.
+    await seed_group(session)
+    bot = MockedBot()
+    await _start_to_roster(dispatcher, bot, session, amount="25")
+    await feed_callback(dispatcher, bot, make_tap("ax:desc"), session=session)
+
+    deletes_before = len(bot.deleted)
+    sends_before = len(bot.sent)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("team lunch", from_id=1001, reply_to_message_id=999),
+        session=session,
+    )
+    assert len(bot.deleted) > deletes_before  # the description prompt was removed
+    assert 1 in {d.message_id for d in bot.deleted}  # and the user's reply (id 1)
+    assert len(bot.sent) > sends_before  # the anchor came back as a new message
+    assert "For: team lunch" in (bot.last_reply or "")
+    assert "Who's in?" in (bot.last_reply or "")
 
 
 # --- happy path: everyone, equal -------------------------------------------
@@ -254,6 +334,33 @@ async def test_exact_split_blocks_until_reconciled(
         "bob": 1000,
         "carol": 1000,
     }
+
+
+async def test_bad_format_share_reasks_without_crashing(
+    dispatcher, session: AsyncSession
+) -> None:
+    # Regression: a wrongly-formatted share used to crash — the re-ask replied to
+    # the bad message that had just been deleted ("message to be replied not
+    # found"). It must re-ask cleanly instead.
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="30")
+    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:m:percent"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:s:0"), session=session)
+
+    sent_before = len(bot.sent)
+    # "abc" isn't a valid percent → re-ask (must not raise on a deleted reply).
+    await feed(
+        dispatcher,
+        bot,
+        make_message("abc", from_id=1001, reply_to_message_id=999),
+        session=session,
+    )
+    assert len(bot.sent) > sent_before  # a fresh re-ask was sent
+    assert "percentage" in (bot.last_reply or "").lower()
+    assert await _expense_count(session) == 0
 
 
 # --- cancellation -----------------------------------------------------------

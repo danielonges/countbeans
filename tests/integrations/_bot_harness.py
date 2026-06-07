@@ -25,9 +25,11 @@ from datetime import datetime, timezone
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import MessageEntityType
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     AnswerCallbackQuery,
+    DeleteMessage,
     EditMessageReplyMarkup,
     EditMessageText,
     GetChatMember,
@@ -86,6 +88,8 @@ class MockedBot(Bot):
         self.sent: list[SendMessage] = []
         self.edits: list[EditMessageText] = []
         self.answers: list[AnswerCallbackQuery] = []
+        self.deleted: list[DeleteMessage] = []
+        self._deleted_ids: set[int] = set()
 
     async def __call__(self, method: TelegramMethod, request_timeout: int | None = None):  # type: ignore[override]
         if isinstance(method, GetMe):
@@ -108,6 +112,14 @@ class MockedBot(Bot):
         if isinstance(method, GetChatMemberCount):
             return self.member_count
         if isinstance(method, SendMessage):
+            # Telegram 400s a reply whose target was deleted; mirror that so the
+            # harness catches "delete a message then reply to it" bugs.
+            rp = method.reply_parameters
+            if rp is not None and rp.message_id in self._deleted_ids:
+                raise TelegramBadRequest(
+                    method=method,
+                    message="Bad Request: message to be replied not found",
+                )
             self.sent.append(method)
             return _fake_sent_message(method)
         if isinstance(method, EditMessageText):
@@ -117,6 +129,10 @@ class MockedBot(Bot):
             self.answers.append(method)
             return True
         if isinstance(method, EditMessageReplyMarkup):
+            return True
+        if isinstance(method, DeleteMessage):
+            self.deleted.append(method)
+            self._deleted_ids.add(method.message_id)
             return True
         raise NotImplementedError(
             f"MockedBot got an un-stubbed call: {type(method).__name__}"
