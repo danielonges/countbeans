@@ -42,6 +42,7 @@ from aiogram.types import (
 
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
+    coverage_gap_warning,
     display_name,
     format_expense_receipt,
     format_money,
@@ -69,6 +70,13 @@ _MODE_DISPLAY = {
     "exact": "Exact amounts",
     "percent": "Percentages",
     "weighted": "Weights",
+}
+
+# The example shown in the per-person share prompt, keyed by split mode.
+_SHARE_HINTS = {
+    "exact": "e.g. 30 or 30.50",
+    "percent": "e.g. 60 for 60%",
+    "weighted": "e.g. 2 for 2x",
 }
 
 
@@ -306,17 +314,17 @@ async def on_wizard_action(
         return
 
     if action == "all":
-        await state.update_data(selected=list(range(len(data.get("roster", [])))))
-        await state.set_state(AddExpenseFlow.participants)
-        await _repaint(bot, chat_id, state)
-        await callback.answer()
+        await _roster_repaint(
+            callback,
+            bot,
+            chat_id,
+            state,
+            selected=list(range(len(data.get("roster", [])))),
+        )
         return
 
     if action == "clear":
-        await state.update_data(selected=[])
-        await state.set_state(AddExpenseFlow.participants)
-        await _repaint(bot, chat_id, state)
-        await callback.answer()
+        await _roster_repaint(callback, bot, chat_id, state, selected=[])
         return
 
     if action.startswith("p:"):
@@ -326,17 +334,11 @@ async def on_wizard_action(
             selected.remove(idx)
         else:
             selected.append(idx)
-        await state.update_data(selected=sorted(selected))
-        await state.set_state(AddExpenseFlow.participants)
-        await _repaint(bot, chat_id, state)
-        await callback.answer()
+        await _roster_repaint(callback, bot, chat_id, state, selected=sorted(selected))
         return
 
     if action.startswith("pg:"):
-        await state.update_data(page=int(action[3:]))
-        await state.set_state(AddExpenseFlow.participants)
-        await _repaint(bot, chat_id, state)
-        await callback.answer()
+        await _roster_repaint(callback, bot, chat_id, state, page=int(action[3:]))
         return
 
     if action == "pdone":
@@ -378,11 +380,7 @@ async def on_wizard_action(
             await callback.answer()
             return
         member = data["roster"][idx]
-        hint = {
-            "exact": "e.g. 30 or 30.50",
-            "percent": "e.g. 60 for 60%",
-            "weighted": "e.g. 2 for 2x",
-        }[data["split_mode"]]
+        hint = _SHARE_HINTS[data["split_mode"]]
         prompt = await bot.send_message(
             chat_id,
             f"{_mention_prefix(callback.from_user)}Share for "
@@ -509,10 +507,8 @@ async def _submit(
         try:
             actual = await bot.get_chat_member_count(chat_id) - 1  # minus the bot
             if len(selected) < actual:
-                gap = actual - len(selected)
                 lines.append(
-                    f"\n⚠️ Split among the {len(selected)} member(s) I know — {gap} "
-                    "more haven't interacted yet. Ask them to /join to be included."
+                    coverage_gap_warning(len(selected), actual - len(selected))
                 )
         except Exception:
             logger.warning(
@@ -819,18 +815,46 @@ async def _reload_roster(state: FSMContext, uow: UnitOfWork) -> None:
 
 
 async def _load_roster(uow: UnitOfWork, data: dict[str, Any]) -> list[MemberInfo]:
-    event_id = data.get("active_event_id")
-    if event_id and not data.get("force_general"):
-        return await uow.events.list_members(uuid.UUID(event_id))
+    if _use_event_scope(data):
+        return await uow.events.list_members(uuid.UUID(data["active_event_id"]))
     return await uow.group_members.list_members(uuid.UUID(data["group_id"]))
 
 
-async def _repaint(bot: Bot, chat_id: int, state: FSMContext) -> None:
+async def _roster_repaint(
+    callback: CallbackQuery,
+    bot: Bot,
+    chat_id: int,
+    state: FSMContext,
+    **update: Any,
+) -> None:
+    """Apply a roster-screen edit (toggle / select-all / clear / page) and repaint
+    the anchor in place. These buttons only render on the roster screen, so the
+    state is re-asserted to ``participants`` defensively before the repaint."""
+    await state.update_data(**update)
+    await state.set_state(AddExpenseFlow.participants)
+    await _repaint(bot, chat_id, state)
+    await callback.answer()
+
+
+async def _render_current(
+    state: FSMContext,
+) -> tuple[dict[str, Any], str, InlineKeyboardMarkup] | None:
+    """Render the anchor for the current FSM state, or ``None`` when no renderer is
+    registered. Returns the state data alongside the text/keyboard so callers that
+    edit or resend the anchor don't re-read it."""
     data = await state.get_data()
     renderer = _RENDERERS.get(await state.get_state() or "")
     if renderer is None:
-        return
+        return None
     text, kb = renderer(data)
+    return data, text, kb
+
+
+async def _repaint(bot: Bot, chat_id: int, state: FSMContext) -> None:
+    rendered = await _render_current(state)
+    if rendered is None:
+        return
+    data, text, kb = rendered
     await _edit_anchor(bot, chat_id, data, text, kb)
 
 
@@ -887,11 +911,10 @@ async def _resend_anchor(bot: Bot, chat_id: int, state: FSMContext) -> None:
     keyboard doesn't jump on every tap. Only the bot's own messages are deleted —
     the user's reply is left untouched.
     """
-    data = await state.get_data()
-    renderer = _RENDERERS.get(await state.get_state() or "")
-    if renderer is None:
+    rendered = await _render_current(state)
+    if rendered is None:
         return
-    text, kb = renderer(data)
+    data, text, kb = rendered
     old_anchor = data.get("anchor_id")
     if old_anchor is not None:
         await _safe_delete(bot, chat_id, old_anchor)
@@ -936,8 +959,14 @@ def _fmt_share(value: int | None, mode: str, currency: str) -> str:
     return f"{value}%" if mode == "percent" else f"{value}x"
 
 
+def _use_event_scope(data: dict[str, Any]) -> bool:
+    """Whether this draft writes to the active event: there is one, and #general
+    hasn't overridden it for this expense. The single source of the scope rule."""
+    return bool(data.get("active_event_id")) and not data.get("force_general")
+
+
 def _scope_label(data: dict[str, Any]) -> str:
-    if data.get("active_event_id") and not data.get("force_general"):
+    if _use_event_scope(data):
         return data.get("active_event_name") or "event"
     if data.get("active_event_id"):
         return "General (#general)"
@@ -945,9 +974,8 @@ def _scope_label(data: dict[str, Any]) -> str:
 
 
 def _effective_event_id(data: dict[str, Any]) -> uuid.UUID | None:
-    event_id = data.get("active_event_id")
-    if event_id and not data.get("force_general"):
-        return uuid.UUID(event_id)
+    if _use_event_scope(data):
+        return uuid.UUID(data["active_event_id"])
     return None
 
 

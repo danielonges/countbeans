@@ -19,6 +19,7 @@ from aiogram.types import Message
 from countbeans.bot.handlers.addexpense_wizard import start_wizard
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
+    coverage_gap_warning,
     format_expense_receipt,
     format_money,
     payer_excluded_from_named_split,
@@ -240,10 +241,8 @@ async def cmd_addexpense(
                 await bot.get_chat_member_count(message.chat.id) - 1
             )  # minus the bot
             if len(participants) < actual:
-                gap = actual - len(participants)
                 lines.append(
-                    f"\n⚠️ Split among the {len(participants)} member(s) I know — "
-                    f"{gap} more haven't interacted yet. Ask them to /join to be included."
+                    coverage_gap_warning(len(participants), actual - len(participants))
                 )
         except Exception:
             logger.warning(

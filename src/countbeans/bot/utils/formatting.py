@@ -104,3 +104,14 @@ def format_expense_receipt(
             f"  {display_name(p.username, p.first_name)}: {format_money(shares.get(p.user_id, 0), currency)}"
         )
     return lines
+
+
+def coverage_gap_warning(known_count: int, gap: int) -> str:
+    """The non-blocking warning appended when a whole-group split can only cover
+    the members the bot has met. ``known_count`` is who's in the split; ``gap`` is
+    how many more the group has that the bot hasn't seen yet. One definition so the
+    inline handler and the wizard can't drift."""
+    return (
+        f"\n⚠️ Split among the {known_count} member(s) I know — {gap} more "
+        "haven't interacted yet. Ask them to /join to be included."
+    )
