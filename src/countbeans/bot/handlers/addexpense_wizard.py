@@ -40,6 +40,7 @@ from aiogram.types import (
 )
 
 from countbeans.bot.utils.formatting import (
+    VOID_HINT,
     display_name,
     format_expense_receipt,
     format_money,
@@ -493,6 +494,7 @@ async def _submit(
                 "could not fetch chat member count for %s", chat_id, exc_info=True
             )
 
+    lines.append(f"\n{VOID_HINT}")
     await _edit_anchor(bot, chat_id, data, "\n".join(lines), None)
     await callback.answer("Added ✅")
     logger.info(

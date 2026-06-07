@@ -66,6 +66,7 @@ async def test_addexpense_records_named_split(
     )
 
     assert "Added expense" in (bot.last_reply or "")
+    assert "/void" in (bot.last_reply or "")  # undo hint on the receipt
     assert await _expense_count(session) == 1
     # The named-but-unseen @bob becomes a pending placeholder.
     bob = await UserRepository(session).find_by_mention("bob")

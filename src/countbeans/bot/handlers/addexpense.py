@@ -18,6 +18,7 @@ from aiogram.types import Message
 
 from countbeans.bot.handlers.addexpense_wizard import start_wizard
 from countbeans.bot.utils.formatting import (
+    VOID_HINT,
     format_expense_receipt,
     format_money,
     payer_excluded_from_named_split,
@@ -270,6 +271,7 @@ async def cmd_addexpense(
     if force_general and active is not None:
         lines.append(f'\nℹ️ Logged as general — not tagged to "{active.name}".')
 
+    lines.append(f"\n{VOID_HINT}")
     await message.reply("\n".join(lines))
     logger.info(
         "Expense recorded: expense_id=%s amount_cents=%d participants=%d",

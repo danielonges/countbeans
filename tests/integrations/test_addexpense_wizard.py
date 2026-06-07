@@ -155,6 +155,7 @@ async def test_everyone_equal_records_expense(
 
     assert "Added expense" in (bot.last_edit or "")
     assert "SGD 25.50" in (bot.last_edit or "")
+    assert "/void" in (bot.last_edit or "")  # undo hint on the receipt
     assert await _expense_count(session) == 1
     assert await _shares_by_username(session) == {
         "alice": 850,

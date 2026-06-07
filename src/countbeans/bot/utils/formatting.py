@@ -53,6 +53,12 @@ _SPLIT_MODE_LABELS = {
     "weighted": " (by weight)",
 }
 
+# Footer appended to a successful expense receipt (inline and wizard) pointing at
+# the undo path. /void removes the most recent expense in the current scope, which
+# — right after an add — is the one just recorded (its payer/recorder may always
+# undo it). One definition so the two entry paths can't drift.
+VOID_HINT = "↩️ Made a mistake? /void undoes the most recent expense."
+
 
 def format_expense_receipt(
     *,
