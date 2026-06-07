@@ -5,8 +5,10 @@ concerns and live here, never in DTOs or the service core (CLAUDE.md: display
 strings are formatted in the bot layer).
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from uuid import UUID
+
+from countbeans.dto.domain import MemberInfo
 
 
 def payer_excluded_from_named_split(
@@ -43,3 +45,56 @@ def display_name(username: str | None, first_name: str | None) -> str:
     if first_name:
         return first_name
     return "someone"
+
+
+_SPLIT_MODE_LABELS = {
+    "exact": " (by exact amount)",
+    "percent": " (by percentage)",
+    "weighted": " (by weight)",
+}
+
+
+def format_expense_receipt(
+    *,
+    scoped_event_name: str | None,
+    description: str | None,
+    amount_cents: int,
+    currency: str,
+    payer_username: str | None,
+    payer_first_name: str | None,
+    participants: Collection[MemberInfo],
+    shares: Mapping[UUID, int],
+    split_mode: str,
+) -> list[str]:
+    """The core expense-confirmation lines shared by the inline /addexpense handler
+    and the interactive wizard: a scope-aware head, the payer, the participant
+    list, and each participant's share (echoing how it was divided).
+
+    Context-specific nudges — the coverage-gap warning, the payer-excluded hint,
+    and the #general-override confirmation — depend on Telegram state the caller
+    holds, so the caller appends those to the returned list.
+    """
+    if scoped_event_name is not None:
+        head = (
+            f'✅ Added to "{scoped_event_name}": {description} — {format_money(amount_cents, currency)}'
+            if description
+            else f'✅ Added to "{scoped_event_name}" — {format_money(amount_cents, currency)}'
+        )
+    else:
+        head = (
+            f"Added expense: {description} — {format_money(amount_cents, currency)}"
+            if description
+            else f"Added expense — {format_money(amount_cents, currency)}"
+        )
+    mode_label = _SPLIT_MODE_LABELS.get(split_mode, "")
+    lines = [
+        head,
+        f"Paid by: {display_name(payer_username, payer_first_name)}",
+        f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
+        f"Shares{mode_label}:",
+    ]
+    for p in participants:
+        lines.append(
+            f"  {display_name(p.username, p.first_name)}: {format_money(shares.get(p.user_id, 0), currency)}"
+        )
+    return lines

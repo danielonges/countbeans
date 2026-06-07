@@ -48,6 +48,7 @@ def dispatcher() -> Dispatcher:
     """
     from countbeans.bot.handlers import (
         addexpense,
+        addexpense_wizard,
         balance,
         currency,
         event,
@@ -68,6 +69,7 @@ def dispatcher() -> Dispatcher:
         help.router,
         settleup.router,
         addexpense.router,
+        addexpense_wizard.router,
         void.router,
         balance.router,
         simplify.router,
@@ -77,3 +79,14 @@ def dispatcher() -> Dispatcher:
         group.router,
         membership.router,
     )
+
+
+@pytest.fixture(autouse=True)
+def _reset_fsm(dispatcher: Dispatcher):
+    """Clear FSM state after each test. The dispatcher (and its MemoryStorage) is
+    session-scoped and shared, so a wizard left mid-flow by one test must not leak
+    its `(chat, user)` state into the next."""
+    yield
+    storage = getattr(dispatcher.storage, "storage", None)
+    if storage is not None:
+        storage.clear()

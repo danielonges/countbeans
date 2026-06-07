@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import MessageEntityType
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     AnswerCallbackQuery,
     EditMessageReplyMarkup,
@@ -161,8 +162,11 @@ class HarnessUoW(UnitOfWork):
 def build_dispatcher(*routers: Router) -> Dispatcher:
     """A Dispatcher wired with the routers under test. Build it **once** per
     process (a Router cannot attach to two Dispatchers) — share it across tests
-    via a module-scoped fixture; the per-test `uow` is passed in `feed`."""
-    dp = Dispatcher()
+    via a module-scoped fixture; the per-test `uow` is passed in `feed`.
+
+    MemoryStorage backs the /addexpense wizard's FSM state; the conftest resets it
+    between tests since this dispatcher is shared."""
+    dp = Dispatcher(storage=MemoryStorage())
     for router in routers:
         dp.include_router(router)
     return dp
@@ -177,9 +181,23 @@ def make_message(
     chat_id: int = DEFAULT_CHAT_ID,
     chat_type: str = "supergroup",
     entities: list[MessageEntity] | None = None,
+    reply_to_message_id: int | None = None,
 ) -> Message:
     """Construct a group (default) or private message carrying `text` (and any
-    message `entities`, e.g. a text_mention)."""
+    message `entities`, e.g. a text_mention).
+
+    `reply_to_message_id` stubs a reply to one of the bot's messages — what the
+    /addexpense wizard's ForceReply steps match on (the bot only receives replies
+    to its own prompts under group privacy mode)."""
+    reply_to = None
+    if reply_to_message_id is not None:
+        reply_to = Message(
+            message_id=reply_to_message_id,
+            date=datetime.now(timezone.utc),
+            chat=Chat(id=chat_id, type=chat_type, title="Test Group"),
+            from_user=User(id=_BOT_ID, is_bot=True, first_name="countbeans"),
+            text="(prompt)",
+        )
     return Message(
         message_id=1,
         date=datetime.now(timezone.utc),
@@ -189,6 +207,7 @@ def make_message(
         ),
         text=text,
         entities=entities,
+        reply_to_message=reply_to,
     )
 
 
@@ -217,12 +236,14 @@ def make_callback(
     from_id: int = 1001,
     username: str | None = "caller",
     chat_id: int = DEFAULT_CHAT_ID,
+    message_id: int = 500,
 ) -> CallbackQuery:
     """An inline-button tap carrying `data` (e.g. `stmt:g:1`). Its `.message` is
-    the bot's own message being repainted — the handler only reads its chat and
-    calls edit_text."""
+    the bot's own message being repainted — the handler reads its chat and id and
+    calls edit_text. `message_id` is the tapped message: pass the wizard's anchor
+    id so the ownership gate (anchor-bound) recognises the initiator's own tap."""
     inline_msg = Message(
-        message_id=500,
+        message_id=message_id,
         date=datetime.now(timezone.utc),
         chat=Chat(id=chat_id, type="supergroup", title="Test Group"),
         from_user=User(id=_BOT_ID, is_bot=True, first_name="countbeans"),

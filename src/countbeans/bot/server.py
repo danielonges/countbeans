@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllGroupChats,
@@ -12,6 +13,7 @@ from aiogram.types import (
 
 from countbeans.bot.handlers import (
     addexpense,
+    addexpense_wizard,
     balance,
     currency,
     event,
@@ -83,9 +85,13 @@ async def run(token: str) -> None:
     def uow_factory() -> UnitOfWork:
         return UnitOfWork(session_factory)
 
-    dp = Dispatcher()
-    # /statements paging arrives as callback queries, so the UoW middleware must
-    # cover both update types — the callback handler issues reads too.
+    # MemoryStorage backs the interactive /addexpense wizard's FSM state (one
+    # in-flight draft per chat+user). In-memory is right for this single-instance
+    # long-poll bot — a half-finished wizard is simply abandoned on restart. It is
+    # aiogram's default, but pinned here because the wizard depends on it.
+    dp = Dispatcher(storage=MemoryStorage())
+    # /statements paging and the /addexpense wizard arrive as callback queries, so
+    # the UoW middleware must cover both update types — the callback handlers read.
     dp.message.middleware(LoggingContextMiddleware())
     dp.callback_query.middleware(LoggingContextMiddleware())
     # my_chat_member / chat_member updates also write (onboarding, bot-admin flag).
@@ -103,6 +109,7 @@ async def run(token: str) -> None:
     dp.include_router(help.router)
     dp.include_router(settleup.router)
     dp.include_router(addexpense.router)
+    dp.include_router(addexpense_wizard.router)
     dp.include_router(void.router)
     dp.include_router(balance.router)
     dp.include_router(simplify.router)

@@ -13,10 +13,12 @@ import logging
 from aiogram import Bot, Router
 from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from countbeans.bot.handlers.addexpense_wizard import start_wizard
 from countbeans.bot.utils.formatting import (
-    display_name,
+    format_expense_receipt,
     format_money,
     payer_excluded_from_named_split,
 )
@@ -35,40 +37,27 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-_USAGE = (
-    'Usage: /addexpense <amount> ["description"] [@user ...]\n'
-    'Example: /addexpense 25.50 "Dinner" @alice @bob\n'
-    "• No @mentions (or @all) → split among everyone in the group.\n"
-    "• Name people → split among only them; you're not included unless you "
-    "@mention yourself.\n"
-    "• Uneven splits: @alice:30 (exact amount), @alice:60% (percentage — must "
-    "total 100), @alice:2x (weight). Use one style per command.\n"
-    "• Quotes are optional — an unquoted description is the words before the "
-    "first @mention; quote it only if it contains an @.\n"
-    "• Quote the description with any matching pair — \"...\", '...', "
-    "“...”/‘...’ (curly, handy on phones), "
-    "«...», or `...`. Escape a quote inside with a backslash: "
-    '"she said \\"hi\\"".\n'
-    "• Prefix the amount with a currency to override the default: $50, €50, USD50.\n"
-    "• While an event is active, add #general to log just this one expense to the "
-    "general (non-event) scope (no /event pause needed)."
-)
-
 
 @router.message(Command("addexpense"))
 async def cmd_addexpense(
-    message: Message, command: CommandObject, uow: UnitOfWork, bot: Bot
+    message: Message,
+    command: CommandObject,
+    uow: UnitOfWork,
+    bot: Bot,
+    state: FSMContext,
 ) -> None:
     if message.from_user is None:
         return
 
     # command.args is everything after the command — already stripped of both
     # "/addexpense" and any "@botname" suffix Telegram appends in groups, so a
-    # bare "/addexpense" (or "/addexpense@bot") yields no args and shows usage.
+    # bare "/addexpense" (or "/addexpense@bot") yields no args. That starts the
+    # interactive, button-driven wizard (addexpense_wizard.py); the inline
+    # one-liner below still serves a command with args.
     tokens = (command.args or "").split()
 
     if not tokens:
-        await message.reply(_USAGE)
+        await start_wizard(message, state, uow)
         return
 
     # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
@@ -225,36 +214,20 @@ async def cmd_addexpense(
         await message.reply(str(exc))
         return
 
+    # The shared receipt body (scope-aware head + paid-by + split-among + shares).
     # Every scoped reply echoes the scope so a "sticky" active event can't quietly
     # mis-file an expense (CLAUDE.md "Events"). General tracking keeps its wording.
-    if scoped_event is not None:
-        head = (
-            f'✅ Added to "{scoped_event.name}": {description} — {format_money(result.amount_cents, result.currency)}'
-            if description
-            else f'✅ Added to "{scoped_event.name}" — {format_money(result.amount_cents, result.currency)}'
-        )
-    else:
-        head = (
-            f"Added expense: {description} — {format_money(result.amount_cents, result.currency)}"
-            if description
-            else f"Added expense — {format_money(result.amount_cents, result.currency)}"
-        )
-    # Echo how the amount was divided so an uneven split's interpretation is visible.
-    mode_label = {
-        "exact": " (by exact amount)",
-        "percent": " (by percentage)",
-        "weighted": " (by weight)",
-    }.get(split.mode, "")
-    lines = [
-        head,
-        f"Paid by: {display_name(payer.username, payer.first_name)}",
-        f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
-        f"Shares{mode_label}:",
-    ]
-    for p in participants:
-        lines.append(
-            f"  {display_name(p.username, p.first_name)}: {format_money(result.shares.get(p.user_id, 0), result.currency)}"
-        )
+    lines = format_expense_receipt(
+        scoped_event_name=scoped_event.name if scoped_event is not None else None,
+        description=description,
+        amount_cents=result.amount_cents,
+        currency=result.currency,
+        payer_username=payer.username,
+        payer_first_name=payer.first_name,
+        participants=participants,
+        shares=result.shares,
+        split_mode=split.mode,
+    )
 
     # When splitting the whole group, warn if the bot can't see everyone — it can
     # only split among members who've interacted (CLAUDE.md "Onboarding"). Inside

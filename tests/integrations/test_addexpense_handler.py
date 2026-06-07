@@ -35,10 +35,13 @@ async def _shares_by_username(session: AsyncSession) -> dict[str | None, int]:
     return {username: cents for username, cents in rows}
 
 
-async def test_addexpense_usage_on_no_args(dispatcher, session: AsyncSession) -> None:
+async def test_addexpense_bare_starts_wizard(dispatcher, session: AsyncSession) -> None:
+    # A bare /addexpense (no args) now launches the interactive wizard: it prompts
+    # for the amount via ForceReply rather than printing inline usage.
     bot = MockedBot()
     await feed(dispatcher, bot, make_message("/addexpense"), session=session)
-    assert "Usage" in (bot.last_reply or "")
+    assert "how much" in (bot.last_reply or "").lower()
+    assert await _expense_count(session) == 0
 
 
 async def test_addexpense_invalid_amount(dispatcher, session: AsyncSession) -> None:
