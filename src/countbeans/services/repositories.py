@@ -8,9 +8,10 @@ from datetime import datetime
 from typing import Literal
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from countbeans.db._mixins import _now
 from countbeans.db.models import (
@@ -27,6 +28,17 @@ from countbeans.dto.domain import ActivitySummary, BalanceKey, BalanceMap, Membe
 from countbeans.dto.results import EventCreatedResult, SettlementCreatedResult
 
 logger = logging.getLogger(__name__)
+
+
+def _event_scope(
+    column: InstrumentedAttribute[uuid.UUID | None], event_id: uuid.UUID | None
+) -> ColumnElement[bool]:
+    """The WHERE clause selecting one ledger scope: the **general** ledger
+    (``event_id IS NULL``) when ``event_id`` is None, else exactly that event's
+    rows. Pass the model's event_id column (``Expense.event_id`` /
+    ``Settlement.event_id``) — one definition so the scope rule can't drift
+    between queries (CLAUDE.md "Events")."""
+    return column == event_id if event_id is not None else column.is_(None)
 
 
 @dataclass(slots=True)
@@ -97,11 +109,7 @@ class ExpenseRepository:
         is None, else exactly that event's rows — mirroring BalanceRepository so a
         /void only ever touches the scope the caller is currently in (CLAUDE.md
         "Events")."""
-        scope = (
-            Expense.event_id == event_id
-            if event_id is not None
-            else Expense.event_id.is_(None)
-        )
+        scope = _event_scope(Expense.event_id, event_id)
         result = await self._session.execute(
             select(Expense)
             .where(Expense.group_id == group_id, Expense.voided_at.is_(None), scope)
@@ -150,16 +158,8 @@ class BalanceRepository:
         balance excludes event-tagged rows and each event derives independently, so
         the sum-to-zero invariant holds per ``(scope, currency)`` (CLAUDE.md
         "Events")."""
-        exp_scope = (
-            Expense.event_id == event_id
-            if event_id is not None
-            else Expense.event_id.is_(None)
-        )
-        set_scope = (
-            Settlement.event_id == event_id
-            if event_id is not None
-            else Settlement.event_id.is_(None)
-        )
+        exp_scope = _event_scope(Expense.event_id, event_id)
+        set_scope = _event_scope(Settlement.event_id, event_id)
         result: BalanceMap = defaultdict(int)
 
         # 1. Payer sums — money fronted
