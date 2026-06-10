@@ -34,6 +34,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from pydantic import ValidationError
 
+from countbeans.bot.utils.context import ChatContext, resolve_chat_context
 from countbeans.bot.utils.formatting import (
     display_name,
     format_money,
@@ -45,7 +46,7 @@ from countbeans.bot.utils.parsing import (
     parse_amount_cents,
 )
 from countbeans.bot.utils.permissions import is_admin
-from countbeans.db.models import Group, User
+from countbeans.db.models import User
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
 from countbeans.services.errors import DomainError
@@ -74,6 +75,16 @@ _USAGE = (
 )
 
 
+def _general_note(ctx: ChatContext) -> str:
+    """Shown after a successful general override mid-event, so a deliberate
+    escape-hatch use is visible (ctx.scope_note is empty in that case)."""
+    return (
+        f'\nℹ️ Recorded as general — not in "{ctx.active_event.name}".'
+        if ctx.force_general and ctx.active_event is not None
+        else ""
+    )
+
+
 @router.message(Command("settleup"))
 async def cmd_settleup(
     message: Message, command: CommandObject, uow: UnitOfWork, bot: Bot
@@ -88,46 +99,16 @@ async def cmd_settleup(
     # regexes (which anchor on the whole args string) try to match.
     args, force_general = extract_general_flag(args)
 
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-
     # Active-event mode: settle within the active event's scope unless #general
     # overrode it for this command (writes are otherwise strictly active-scoped).
-    # event_id, scope_note, and the currency fallback all key off `scoped_event`.
-    active = (
-        await uow.events.get(group.active_event_id) if group.active_event_id else None
-    )
-    scoped_event = None if force_general else active
-    event_id = scoped_event.id if scoped_event else None
-    scope_note = f' in "{scoped_event.name}"' if scoped_event else ""
-    currency = (
-        scoped_event.default_currency if scoped_event else None
-    ) or group.default_currency
-    # Shown after a successful general override mid-event, so a deliberate
-    # escape-hatch use is visible (the scope_note above is empty in that case).
-    general_note = (
-        f'\nℹ️ Recorded as general — not in "{active.name}".'
-        if force_general and active is not None
-        else ""
-    )
+    # event_id, scope_note, and the currency fallback all key off ctx.scoped_event.
+    ctx = (await resolve_chat_context(uow, message)).scoped(force_general=force_general)
 
     # Two handles → admin records a settlement for a pair (e.g. a departed
     # member). Tried before the single-handle form, which it would also match.
     pair = _PAIR_ARGS_RE.match(args)
     if pair:
-        await _settle_on_behalf(
-            message,
-            bot,
-            uow,
-            group,
-            event_id,
-            scope_note,
-            general_note,
-            currency,
-            *pair.groups(),
-        )
+        await _settle_on_behalf(message, bot, uow, ctx, *pair.groups())
         return
 
     match = _ARGS_RE.match(args)
@@ -140,26 +121,10 @@ async def cmd_settleup(
 
     # @all — settle the whole scope at once. Admin-only and amount-less.
     if is_all(target_username):
-        await _settle_whole_group(
-            message,
-            bot,
-            uow,
-            group.id,
-            group.simplify_debts,
-            event_id,
-            scope_note,
-            general_note,
-        )
+        await _settle_whole_group(message, bot, uow, ctx)
         return
 
-    from_user = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, from_user.id)
+    from_user = ctx.caller
 
     # A normal mention must resolve to someone already known — never create a
     # placeholder here (a typo'd /settleup @foo would otherwise leave a stray).
@@ -174,12 +139,10 @@ async def cmd_settleup(
     amount_cents = await _resolve_amount(
         message,
         uow,
-        group,
+        ctx,
         from_user=from_user,
         to_user=to_user,
         amount_str=amount_str,
-        event_id=event_id,
-        currency=currency,
         from_label="you",
         to_label=f"@{target_username}",
     )
@@ -189,12 +152,10 @@ async def cmd_settleup(
     result = await _record(
         message,
         uow,
-        group=group,
+        ctx,
         from_user=from_user,
         to_user=to_user,
         amount_cents=amount_cents,
-        currency=currency,
-        event_id=event_id,
         created_by=from_user.id,
     )
     if result is None:
@@ -202,9 +163,9 @@ async def cmd_settleup(
 
     auto_note = " (full amount owed)" if amount_str is None else ""
     await message.reply(
-        f"Settled up{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
+        f"Settled up{ctx.scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{format_money(result.amount_cents, result.currency)}{auto_note}{general_note}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}{_general_note(ctx)}"
     )
     logger.info(
         "Settlement recorded: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -220,11 +181,7 @@ async def _settle_on_behalf(
     message: Message,
     bot: Bot,
     uow: UnitOfWork,
-    group: Group,
-    event_id: uuid.UUID | None,
-    scope_note: str,
-    general_note: str,
-    currency: str,
+    ctx: ChatContext,
     from_handle: str,
     to_handle: str,
     amount_str: str | None,
@@ -272,12 +229,10 @@ async def _settle_on_behalf(
     amount_cents = await _resolve_amount(
         message,
         uow,
-        group,
+        ctx,
         from_user=from_user,
         to_user=to_user,
         amount_str=amount_str,
-        event_id=event_id,
-        currency=currency,
         from_label=f"@{from_handle}",
         to_label=f"@{to_handle}",
     )
@@ -286,24 +241,14 @@ async def _settle_on_behalf(
 
     # The recording admin is the author (created_by) — an audit trail of who
     # logged a payment they weren't a party to.
-    actor = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, actor.id)
     result = await _record(
         message,
         uow,
-        group=group,
+        ctx,
         from_user=from_user,
         to_user=to_user,
         amount_cents=amount_cents,
-        currency=currency,
-        event_id=event_id,
-        created_by=actor.id,
+        created_by=ctx.caller.id,
     )
     if result is None:
         return
@@ -317,9 +262,9 @@ async def _settle_on_behalf(
         else ""
     )
     await message.reply(
-        f"Recorded{scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
+        f"Recorded{ctx.scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
         f"{display_name(to_user.username, to_user.first_name)} "
-        f"{format_money(result.amount_cents, result.currency)}{auto_note}.{confirm}{general_note}"
+        f"{format_money(result.amount_cents, result.currency)}{auto_note}.{confirm}{_general_note(ctx)}"
     )
     logger.info(
         "On-behalf settlement by admin=%s: settlement_id=%s from=%s to=%s amount_cents=%d currency=%s",
@@ -335,13 +280,11 @@ async def _settle_on_behalf(
 async def _resolve_amount(
     message: Message,
     uow: UnitOfWork,
-    group: Group,
+    ctx: ChatContext,
     *,
     from_user: User,
     to_user: User,
     amount_str: str | None,
-    event_id: uuid.UUID | None,
-    currency: str,
     from_label: str,
     to_label: str,
 ) -> int | None:
@@ -360,12 +303,13 @@ async def _resolve_amount(
 
     owed = await owed_by_currency(
         uow,
-        group.id,
+        ctx.group.id,
         from_user.id,
         to_user.id,
-        simplify_debts=group.simplify_debts,
-        event_id=event_id,
+        simplify_debts=ctx.group.simplify_debts,
+        event_id=ctx.event_id,
     )
+    currency = ctx.currency
     if currency not in owed:
         others = [c for c in owed if c != currency]
         if others:
@@ -386,13 +330,11 @@ async def _resolve_amount(
 async def _record(
     message: Message,
     uow: UnitOfWork,
+    ctx: ChatContext,
     *,
-    group: Group,
     from_user: User,
     to_user: User,
     amount_cents: int,
-    currency: str,
-    event_id: uuid.UUID | None,
     created_by: uuid.UUID,
 ) -> SettlementCreatedResult | None:
     """Build the command and record the settlement, replying with the error and
@@ -401,12 +343,12 @@ async def _record(
     suggested payment in that direction, or the amount exceeds what's owed)."""
     try:
         cmd = SettleUpCommand(
-            group_id=group.id,
+            group_id=ctx.group.id,
             from_user_id=from_user.id,
             to_user_id=to_user.id,
             amount_cents=amount_cents,
-            currency=currency,
-            event_id=event_id,
+            currency=ctx.currency,
+            event_id=ctx.event_id,
             created_by=created_by,
         )
     except ValidationError as exc:
@@ -415,21 +357,14 @@ async def _record(
         return None
 
     try:
-        return await settle_up(uow, cmd, simplify_debts=group.simplify_debts)
+        return await settle_up(uow, cmd, simplify_debts=ctx.group.simplify_debts)
     except DomainError as exc:
         await message.reply(str(exc))
         return None
 
 
 async def _settle_whole_group(
-    message: Message,
-    bot: Bot,
-    uow: UnitOfWork,
-    group_id: uuid.UUID,
-    simplify_debts: bool,
-    event_id: uuid.UUID | None,
-    scope_note: str,
-    general_note: str,
+    message: Message, bot: Bot, uow: UnitOfWork, ctx: ChatContext
 ) -> None:
     """/settleup @all — record every suggested transfer to zero the scope.
 
@@ -445,11 +380,14 @@ async def _settle_whole_group(
         return
 
     results = await settle_all(
-        uow, group_id, simplify_debts=simplify_debts, event_id=event_id
+        uow,
+        ctx.group.id,
+        simplify_debts=ctx.group.simplify_debts,
+        event_id=ctx.event_id,
     )
     if not results:
         await message.reply(
-            f"Everyone's already settled up{scope_note} — nothing to record."
+            f"Everyone's already settled up{ctx.scope_note} — nothing to record."
         )
         return
 
@@ -461,16 +399,16 @@ async def _settle_whole_group(
         return display_name(username, first_name)
 
     lines = [
-        f"✅ Settled up the whole group{scope_note} — {len(results)} transfer(s) recorded:"
+        f"✅ Settled up the whole group{ctx.scope_note} — {len(results)} transfer(s) recorded:"
     ]
     for r in results:
         lines.append(
             f"  {name(r.from_user_id)} → {name(r.to_user_id)}: {format_money(r.amount_cents, r.currency)}"
         )
-    await message.reply("\n".join(lines) + general_note)
+    await message.reply("\n".join(lines) + _general_note(ctx))
     logger.info(
         "Group settle-up by user=%s in group=%s: %d settlements",
         message.from_user.id,
-        group_id,
+        ctx.group.id,
         len(results),
     )
