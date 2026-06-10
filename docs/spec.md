@@ -241,7 +241,7 @@ A split is two independent choices: **who** is in it (participant selection) and
 | Percentage | `/addexpense 50 Dinner @a:60% @b:40%` | percentages must sum to 100 |
 | Weighted | `/addexpense 50 Dinner @a:2x @b:1x` | split in proportion to integer weights |
 
-Equal, percentage, and weighted splits are the *same* operation — apportion the amount in proportion to integer weights — using the **largest-remainder method** so the cents always reconcile. Exact mode skips apportionment and takes the given cents after validating their sum.
+Equal, percentage, and weighted splits are the *same* operation — apportion the amount in proportion to integer weights — using the **largest-remainder method** so the cents always reconcile. Exact mode skips apportionment and takes the given cents after validating their sum. Rule violations raise `DomainError` (`services/errors.py`, a `ValueError` subclass marking messages safe to show the user — the handler replies with it verbatim).
 
 ```python
 def apportion(amount_cents: int, weights: dict[Id, int]) -> dict[Id, int]:
@@ -249,7 +249,7 @@ def apportion(amount_cents: int, weights: dict[Id, int]) -> dict[Id, int]:
     amount_cents (largest-remainder method)."""
     total = sum(weights.values())
     if total <= 0:
-        raise ValueError("weights must sum to a positive value")
+        raise DomainError("weights must sum to a positive value")
     shares, remainders, allocated = {}, [], 0
     for k, w in weights.items():
         exact = amount_cents * w
@@ -271,11 +271,11 @@ def compute_shares(amount_cents, participants, mode="equal", params=None):
             return apportion(amount_cents, params)
         case "percent":                          # params: {id: percent}
             if sum(params.values()) != 100:
-                raise ValueError("percentages must sum to 100")
+                raise DomainError("percentages must sum to 100")
             return apportion(amount_cents, params)
         case "exact":                            # params: {id: cents}
             if sum(params.values()) != amount_cents:
-                raise ValueError("exact shares must sum to the expense amount")
+                raise DomainError("exact shares must sum to the expense amount")
             return params
 ```
 
@@ -338,7 +338,7 @@ This is a deliberate trade. A **block-until-confirmed** flow (refuse the write, 
 
 ### The interactive `/addexpense` wizard
 
-A **bare `/addexpense`** (no args) launches a guided, button-driven flow instead of the one-liner grammar above — for users who'd rather tap than type. It is purely **additive**: the one-liner still serves power users unchanged, and the wizard is a bot-layer **entry path** only, collecting the same fields and calling the same `add_expense` service path (no new service code). It runs **in the group chat** (not a DM deep-link) and is implemented in `bot/handlers/addexpense_wizard.py`. The steps:
+A **bare `/addexpense`** (no args) launches a guided, button-driven flow instead of the one-liner grammar above — for users who'd rather tap than type. It is purely **additive**: the one-liner still serves power users unchanged, and the wizard is a bot-layer **entry path** only, collecting the same fields and calling the same `add_expense` service path (no new service code). It runs **in the group chat** (not a DM deep-link) and is implemented in the `bot/handlers/addexpense_wizard/` package (`states` / `render` / `steps` / `actions`). The steps:
 
 1. **Amount + optional description** — prompted with a `ForceReply`; the reply is `<amount> [description]` on one line (e.g. `50.25 1 night at Domino's`, quotes optional). A currency prefix overrides (`$50`, `USD50`).
 2. **Participant roster** — a tap-to-toggle list of known members (paged, with *Everyone* / *Clear*), opening with everyone selected (matching the one-liner's "no mentions = all"). A 📝 button re-prompts for the description, and — when an event is active — a 📂 button flips the draft to `#general` scope.
