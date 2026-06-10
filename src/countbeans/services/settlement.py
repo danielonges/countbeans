@@ -5,9 +5,6 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
-
-from countbeans.db.models import Settlement
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
 
@@ -77,9 +74,7 @@ async def settle_up(
             "that or less, or omit the amount to settle in full."
         )
 
-    settlement_id = uuid_utils.uuid7()
-    settlement = Settlement(
-        id=settlement_id,
+    result = await uow.settlements.add(
         group_id=cmd.group_id,
         event_id=cmd.event_id,
         from_user_id=cmd.from_user_id,
@@ -87,9 +82,8 @@ async def settle_up(
         amount_cents=cmd.amount_cents,
         currency=cmd.currency,
     )
-    await uow.settlements.add(settlement)
-    logger.debug("settle_up: recorded settlement_id=%s", settlement_id)
-    return uow.settlements._to_dto(settlement)
+    logger.debug("settle_up: recorded settlement_id=%s", result.settlement_id)
+    return result
 
 
 async def settle_all(
@@ -112,16 +106,15 @@ async def settle_all(
     balances = await uow.balances.compute_for_group(group_id, event_id=event_id)
     results: list[SettlementCreatedResult] = []
     for transfer in suggested_transfers(balances, simplify_debts=simplify_debts):
-        settlement = Settlement(
-            id=uuid_utils.uuid7(),
-            group_id=group_id,
-            event_id=event_id,
-            from_user_id=transfer.from_user_id,
-            to_user_id=transfer.to_user_id,
-            amount_cents=transfer.amount_cents,
-            currency=transfer.currency,
+        results.append(
+            await uow.settlements.add(
+                group_id=group_id,
+                event_id=event_id,
+                from_user_id=transfer.from_user_id,
+                to_user_id=transfer.to_user_id,
+                amount_cents=transfer.amount_cents,
+                currency=transfer.currency,
+            )
         )
-        await uow.settlements.add(settlement)
-        results.append(uow.settlements._to_dto(settlement))
     logger.debug("settle_all: recorded %d settlements", len(results))
     return results

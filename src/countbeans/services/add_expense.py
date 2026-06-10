@@ -5,9 +5,6 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID (pydantic DTOs reject uuid_utils.UUID)
-
-from countbeans.db.models import Expense
 from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.dto.domain import MemberInfo
 from countbeans.dto.results import ExpenseCreatedResult
@@ -161,9 +158,7 @@ async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreated
     shares = compute_shares(
         cmd.amount_cents, list(cmd.participants), cmd.split_mode, cmd.split_params
     )
-    expense_id = uuid_utils.uuid7()
-    expense = Expense(
-        id=expense_id,
+    expense_id = await uow.expenses.add(
         group_id=cmd.group_id,
         event_id=cmd.event_id,
         payer_id=cmd.payer_id,
@@ -171,8 +166,8 @@ async def add_expense(uow: UnitOfWork, cmd: AddExpenseCommand) -> ExpenseCreated
         currency=cmd.currency,
         description=cmd.description,
         created_by=cmd.created_by,
+        shares=shares,
     )
-    await uow.expenses.add(expense, shares)
     logger.debug("add_expense: recorded expense_id=%s", expense_id)
     return ExpenseCreatedResult(
         expense_id=expense_id,

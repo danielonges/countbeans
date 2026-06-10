@@ -10,12 +10,9 @@ caller-managed UoW.
 import logging
 import uuid
 
-import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID
-
 logger = logging.getLogger(__name__)
 
 from countbeans.db._mixins import _now
-from countbeans.db.models import Event
 from countbeans.dto.commands import (
     CreateEventCommand,
     EditEventRosterCommand,
@@ -46,19 +43,16 @@ async def create_event(uow: UnitOfWork, cmd: CreateEventCommand) -> EventCreated
         raise DomainError(
             "An event is already open — close it with /event close before starting another."
         )
-    event = Event(
-        id=uuid_utils.uuid7(),
+    result = await uow.events.create(
         group_id=cmd.group_id,
         name=cmd.name,
         default_currency=cmd.default_currency,
-        status="open",
         created_by=cmd.created_by,
     )
-    await uow.events.create(event)
-    await uow.events.ensure_member(event.id, cmd.created_by)
-    await uow.groups.set_active_event(cmd.group_id, event.id)
-    logger.debug("create_event: created event_id=%s", event.id)
-    return uow.events._to_result(event)
+    await uow.events.ensure_member(result.event_id, cmd.created_by)
+    await uow.groups.set_active_event(cmd.group_id, result.event_id)
+    logger.debug("create_event: created event_id=%s", result.event_id)
+    return result
 
 
 async def set_active_event(uow: UnitOfWork, cmd: SetActiveEventCommand) -> None:

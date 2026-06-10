@@ -63,9 +63,29 @@ class SettlementRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def add(self, settlement: Settlement) -> None:
+    async def add(
+        self,
+        *,
+        group_id: uuid.UUID,
+        event_id: uuid.UUID | None,
+        from_user_id: uuid.UUID,
+        to_user_id: uuid.UUID,
+        amount_cents: int,
+        currency: str,
+    ) -> SettlementCreatedResult:
+        """Insert one settlement (id generated here) and return its result DTO."""
+        settlement = Settlement(
+            id=uuid_utils.uuid7(),
+            group_id=group_id,
+            event_id=event_id,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            amount_cents=amount_cents,
+            currency=currency,
+        )
         self._session.add(settlement)
         await self._session.flush()
+        return self._to_dto(settlement)
 
     async def get(self, settlement_id: uuid.UUID) -> Settlement | None:
         result = await self._session.execute(
@@ -88,7 +108,30 @@ class ExpenseRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def add(self, expense: Expense, shares: dict[uuid.UUID, int]) -> None:
+    async def add(
+        self,
+        *,
+        group_id: uuid.UUID,
+        event_id: uuid.UUID | None,
+        payer_id: uuid.UUID,
+        amount_cents: int,
+        currency: str,
+        description: str | None,
+        created_by: uuid.UUID,
+        shares: dict[uuid.UUID, int],
+    ) -> uuid.UUID:
+        """Insert one expense and its share rows (id generated here); returns
+        the new expense id."""
+        expense = Expense(
+            id=uuid_utils.uuid7(),
+            group_id=group_id,
+            event_id=event_id,
+            payer_id=payer_id,
+            amount_cents=amount_cents,
+            currency=currency,
+            description=description,
+            created_by=created_by,
+        )
         self._session.add(expense)
         await self._session.flush()
         self._session.add_all(
@@ -98,6 +141,7 @@ class ExpenseRepository:
             ]
         )
         await self._session.flush()
+        return expense.id
 
     async def latest_active_in_scope(
         self, group_id: uuid.UUID, *, event_id: uuid.UUID | None
@@ -570,9 +614,27 @@ class EventRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def create(self, event: Event) -> None:
+    async def create(
+        self,
+        *,
+        group_id: uuid.UUID,
+        name: str,
+        default_currency: str | None,
+        created_by: uuid.UUID,
+    ) -> EventCreatedResult:
+        """Insert one OPEN event (id generated here) and return its result DTO.
+        The one-open-per-group check happens in the service via get_open."""
+        event = Event(
+            id=uuid_utils.uuid7(),
+            group_id=group_id,
+            name=name,
+            default_currency=default_currency,
+            status="open",
+            created_by=created_by,
+        )
         self._session.add(event)
         await self._session.flush()
+        return self._to_result(event)
 
     async def get(self, event_id: uuid.UUID) -> Event | None:
         result = await self._session.execute(select(Event).where(Event.id == event_id))
