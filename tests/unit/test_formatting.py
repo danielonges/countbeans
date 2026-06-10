@@ -2,10 +2,15 @@
 
 from uuid import uuid4
 
+import pytest
+from pydantic import ValidationError
+
 from countbeans.bot.utils.formatting import (
     display_name,
+    humanize_validation_error,
     payer_excluded_from_named_split,
 )
+from countbeans.dto.commands import AddExpenseCommand, SettleUpCommand
 
 
 def test_prefers_username() -> None:
@@ -56,3 +61,39 @@ def test_nudge_for_event_scoped_named_split_when_payer_absent() -> None:
     payer = uuid4()
     roster = [uuid4(), uuid4()]
     assert payer_excluded_from_named_split(True, roster, payer) is True
+
+
+# humanize_validation_error — the chat reply must carry the validator's own rule
+# message, never pydantic's developer report (model name, input reprs, docs URL).
+def test_humanized_field_validator_message() -> None:
+    payer = uuid4()
+    with pytest.raises(ValidationError) as exc_info:
+        AddExpenseCommand(
+            group_id=uuid4(),
+            payer_id=payer,
+            amount_cents=1000,
+            currency="USD",
+            participants=[],
+            created_by=payer,
+        )
+    msg = humanize_validation_error(exc_info.value)
+    assert msg == "participants must not be empty"
+    assert "errors.pydantic.dev" not in msg
+    assert "validation error for" not in msg
+
+
+def test_humanized_model_validator_message() -> None:
+    same = uuid4()
+    with pytest.raises(ValidationError) as exc_info:
+        SettleUpCommand(
+            group_id=uuid4(),
+            from_user_id=same,
+            to_user_id=same,
+            amount_cents=1000,
+            currency="USD",
+            created_by=same,
+        )
+    msg = humanize_validation_error(exc_info.value)
+    assert msg == "from_user_id and to_user_id must be different users"
+    assert "errors.pydantic.dev" not in msg
+    assert "validation error for" not in msg

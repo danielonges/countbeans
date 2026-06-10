@@ -15,6 +15,7 @@ from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from pydantic import ValidationError
 
 from countbeans.bot.handlers.addexpense_wizard import start_wizard
 from countbeans.bot.utils.formatting import (
@@ -22,6 +23,7 @@ from countbeans.bot.utils.formatting import (
     coverage_gap_warning,
     format_expense_receipt,
     format_money,
+    humanize_validation_error,
     payer_excluded_from_named_split,
 )
 from countbeans.bot.utils.parsing import (
@@ -203,9 +205,9 @@ async def cmd_addexpense(
             event_id=event_id,
             created_by=payer.id,
         )
-    except Exception as exc:
+    except ValidationError as exc:
         logger.warning("Invalid /addexpense command: %s", exc)
-        await message.reply(f"Invalid command: {exc}")
+        await message.reply(f"Invalid command: {humanize_validation_error(exc)}")
         return
 
     # add_expense raises ValueError with a user-facing message when a split

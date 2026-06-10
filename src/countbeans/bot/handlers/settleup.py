@@ -32,8 +32,13 @@ import uuid
 from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
+from pydantic import ValidationError
 
-from countbeans.bot.utils.formatting import display_name, format_money
+from countbeans.bot.utils.formatting import (
+    display_name,
+    format_money,
+    humanize_validation_error,
+)
 from countbeans.bot.utils.parsing import (
     extract_general_flag,
     is_all,
@@ -403,9 +408,9 @@ async def _record(
             event_id=event_id,
             created_by=created_by,
         )
-    except Exception as exc:
+    except ValidationError as exc:
         logger.warning("Invalid /settleup command: %s", exc)
-        await message.reply(f"Invalid command: {exc}")
+        await message.reply(f"Invalid command: {humanize_validation_error(exc)}")
         return None
 
     try:

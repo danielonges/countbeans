@@ -39,6 +39,7 @@ from aiogram.types import (
     Message,
     User,
 )
+from pydantic import ValidationError
 
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
@@ -46,6 +47,7 @@ from countbeans.bot.utils.formatting import (
     display_name,
     format_expense_receipt,
     format_money,
+    humanize_validation_error,
 )
 from countbeans.bot.utils.parsing import (
     extract_quoted_description,
@@ -485,9 +487,11 @@ async def _submit(
             event_id=event_id,
             created_by=payer_id,
         )
-    except Exception as exc:  # DTO validation
+    except ValidationError as exc:
         await state.update_data(submitting=False)
-        await callback.answer(f"Invalid: {exc}", show_alert=True)
+        await callback.answer(
+            f"Invalid: {humanize_validation_error(exc)}", show_alert=True
+        )
         return
 
     try:

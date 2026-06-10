@@ -8,7 +8,19 @@ strings are formatted in the bot layer).
 from collections.abc import Collection, Mapping
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from countbeans.dto.domain import MemberInfo
+
+
+def humanize_validation_error(exc: ValidationError) -> str:
+    """The first failed rule of a pydantic ValidationError, as one plain sentence.
+
+    ``str(exc)`` is a developer report — model name, field paths, input reprs, an
+    errors.pydantic.dev URL — none of which belongs in a chat reply. The ``msg``
+    field is the validator's own message, minus pydantic's "Value error, " framing.
+    """
+    return exc.errors()[0]["msg"].removeprefix("Value error, ")
 
 
 def payer_excluded_from_named_split(
