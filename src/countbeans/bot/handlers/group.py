@@ -6,6 +6,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name
 from countbeans.services.group_info import get_group_info
 from countbeans.services.uow import UnitOfWork
@@ -20,19 +21,7 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     if message.from_user is None:
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    caller = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, caller.id)
+    group = (await resolve_chat_context(uow, message)).group
 
     try:
         chat_count = await bot.get_chat_member_count(message.chat.id)

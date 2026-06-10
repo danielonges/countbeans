@@ -7,6 +7,7 @@ from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import is_all_selector
 from countbeans.services.balance import get_group_summary
@@ -30,29 +31,16 @@ async def cmd_balance(
     if message.from_user is None:
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    caller = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, caller.id)
+    ctx = await resolve_chat_context(uow, message)
+    group, caller = ctx.group, ctx.caller
 
     args = (command.args or "").split()
     show_all = is_all_selector(args)
 
     # /balance defaults to the active event's scope (general when none is active).
     # Named cross-scope reads (/balance general, /balance "<event>") are deferred.
-    active = (
-        await uow.events.get(group.active_event_id) if group.active_event_id else None
-    )
-    scope_in = f' in "{active.name}"' if active else ""
+    active = ctx.active_event
+    scope_in = ctx.scope_note
     summary = await get_group_summary(
         uow, group.id, group.simplify_debts, event_id=active.id if active else None
     )

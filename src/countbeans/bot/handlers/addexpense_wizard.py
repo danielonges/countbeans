@@ -41,6 +41,7 @@ from aiogram.types import (
 )
 from pydantic import ValidationError
 
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
     coverage_gap_warning,
@@ -103,36 +104,18 @@ async def start_wizard(message: Message, state: FSMContext, uow: UnitOfWork) -> 
     if message.from_user is None:
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    payer = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, payer.id)
-
-    active = (
-        await uow.events.get(group.active_event_id) if group.active_event_id else None
-    )
-    currency_default = (
-        active.default_currency if active else None
-    ) or group.default_currency
+    ctx = await resolve_chat_context(uow, message)
+    payer, active = ctx.caller, ctx.active_event
 
     await state.set_state(AddExpenseFlow.amount)
     await state.set_data(
         {
             "initiator_id": message.from_user.id,
-            "group_id": str(group.id),
+            "group_id": str(ctx.group.id),
             "payer_id": str(payer.id),
             "payer_username": payer.username,
             "payer_first_name": payer.first_name,
-            "currency_default": currency_default,
+            "currency_default": ctx.currency,
             "active_event_id": str(active.id) if active else None,
             "active_event_name": active.name if active else None,
             "force_general": False,

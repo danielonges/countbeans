@@ -19,6 +19,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.dto.results import ExpenseVoidedResult, VoidOutcome
@@ -35,34 +36,21 @@ async def cmd_void(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     if message.from_user is None:
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    caller = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, caller.id)
-
     # Active-event mode: void within the active event's scope (general when none is
     # active) — mirrors /addexpense and /balance so /void undoes what was just added.
-    active = (
-        await uow.events.get(group.active_event_id) if group.active_event_id else None
-    )
-    event_id = active.id if active else None
-    scope_note = f' in "{active.name}"' if active else ""
+    ctx = await resolve_chat_context(uow, message)
+    scope_note = ctx.scope_note
 
     # The admin gate needs the Bot (getChatMember), so it lives here; the service
     # stays SQL-only and trusts this already-checked flag.
     caller_is_admin = await is_admin(bot, message.chat.id, message.from_user.id)
 
     result = await void_last_expense(
-        uow, group.id, caller.id, event_id=event_id, allow_any=caller_is_admin
+        uow,
+        ctx.group.id,
+        ctx.caller.id,
+        event_id=ctx.event_id,
+        allow_any=caller_is_admin,
     )
 
     if result.outcome is VoidOutcome.NOTHING:

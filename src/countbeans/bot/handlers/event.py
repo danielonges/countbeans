@@ -28,6 +28,7 @@ from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import extract_quoted_description, is_all
 from countbeans.bot.utils.permissions import is_admin
@@ -110,22 +111,11 @@ async def cmd_event(
         )
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    caller = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-    await uow.group_members.ensure_member(group.id, caller.id)
+    ctx = await resolve_chat_context(uow, message)
+    group = ctx.group
 
     if sub == "new":
-        await _new(message, uow, group, caller.id, rest)
+        await _new(message, uow, group, ctx.caller.id, rest)
     elif sub == "pause":
         await _pause(message, uow, group)
     elif sub == "resume":

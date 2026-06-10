@@ -18,6 +18,7 @@ from aiogram.types import Message
 from pydantic import ValidationError
 
 from countbeans.bot.handlers.addexpense_wizard import start_wizard
+from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
     coverage_gap_warning,
@@ -65,24 +66,11 @@ async def cmd_addexpense(
         await start_wizard(message, state, uow)
         return
 
-    # Group first: the placeholder-claim in upsert is group-scoped (claim_in_group).
-    group = await uow.groups.upsert(
-        telegram_chat_id=message.chat.id,
-        group_name=getattr(message.chat, "title", None),
-    )
-    payer = await uow.users.upsert(
-        telegram_user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        claim_in_group=group.id,
-    )
-
-    # Active-event mode: when the group has an active event, auto-tag this expense
-    # to it and split the event roster (not the whole group) — CLAUDE.md "Events".
-    active = (
-        await uow.events.get(group.active_event_id) if group.active_event_id else None
-    )
+    # Active-event mode rides along: when the group has an active event, this
+    # expense auto-tags to it and splits the event roster (not the whole group) —
+    # CLAUDE.md "Events".
+    ctx = await resolve_chat_context(uow, message)
+    payer = ctx.caller
 
     rest = " ".join(tokens[1:])
 
@@ -107,19 +95,17 @@ async def cmd_addexpense(
 
     # The effective scope: the active event, unless #general overrode it for this
     # command. event_id, the currency fallback, the reply head, and the coverage
-    # check all key off `scoped_event` (not `active`), so an override behaves
-    # exactly like "no active event".
-    scoped_event = None if force_general else active
-    event_id = scoped_event.id if scoped_event else None
+    # check all key off `scoped_event` (not the raw active event), so an override
+    # behaves exactly like "no active event".
+    ctx = ctx.scoped(force_general=force_general)
+    scoped_event = ctx.scoped_event
+    event_id = ctx.event_id
 
     # The amount token may carry a currency marker ($50, €50, USD50); fall back to
     # the scoped event's currency, then the group default. Mixed currencies are
     # fine — balances derive per-currency (see CLAUDE.md "Deriving balances").
-    scope_currency = (
-        scoped_event.default_currency if scoped_event else None
-    ) or group.default_currency
     try:
-        currency, amount_cents = parse_money(tokens[0], scope_currency)
+        currency, amount_cents = parse_money(tokens[0], ctx.currency)
     except ValueError:
         await message.reply("Invalid amount. Use a positive number like 25.50")
         return
@@ -180,7 +166,7 @@ async def cmd_addexpense(
             return
 
     participants = await resolve_participants(
-        uow, group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
+        uow, ctx.group.id, payer.id, named, mentioned_users=mentioned, event_id=event_id
     )
 
     # In a non-equal split, map each resolved participant to its parsed share.
@@ -195,7 +181,7 @@ async def cmd_addexpense(
 
     try:
         cmd = AddExpenseCommand(
-            group_id=group.id,
+            group_id=ctx.group.id,
             payer_id=payer.id,
             amount_cents=amount_cents,
             currency=currency,
@@ -270,8 +256,10 @@ async def cmd_addexpense(
     # deliberate escape-hatch use is visible (the head already omits the event).
     # No per-reply nudge on ordinary event expenses — the scope echo above is the
     # signal, and #general is the one-step way to opt out (CLAUDE.md "Events").
-    if force_general and active is not None:
-        lines.append(f'\nℹ️ Logged as general — not tagged to "{active.name}".')
+    if force_general and ctx.active_event is not None:
+        lines.append(
+            f'\nℹ️ Logged as general — not tagged to "{ctx.active_event.name}".'
+        )
 
     lines.append(f"\n{VOID_HINT}")
     await message.reply("\n".join(lines))
