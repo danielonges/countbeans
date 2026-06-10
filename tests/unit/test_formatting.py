@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from countbeans.bot.utils.formatting import (
     display_name,
+    general_override_note,
     humanize_validation_error,
     payer_excluded_from_named_split,
 )
@@ -61,6 +62,14 @@ def test_nudge_for_event_scoped_named_split_when_payer_absent() -> None:
     payer = uuid4()
     roster = [uuid4(), uuid4()]
     assert payer_excluded_from_named_split(True, roster, payer) is True
+
+
+# general_override_note — the #general confirmation shared by the inline handler
+# and the wizard (one definition so the two entry paths can't drift).
+def test_general_override_note_names_the_event() -> None:
+    assert general_override_note("Bali") == (
+        '\nℹ️ Logged as general — not tagged to "Bali".'
+    )
 
 
 # humanize_validation_error — the chat reply must carry the validator's own rule

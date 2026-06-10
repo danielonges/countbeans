@@ -21,9 +21,9 @@ from countbeans.bot.handlers.addexpense_wizard import start_wizard
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
-    coverage_gap_warning,
     format_expense_receipt,
     format_money,
+    general_override_note,
     humanize_validation_error,
     payer_excluded_from_named_split,
 )
@@ -34,6 +34,7 @@ from countbeans.bot.utils.parsing import (
     parse_participants,
     unquoted_description,
 )
+from countbeans.bot.utils.replies import whole_group_coverage_warning
 from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.services.add_expense import add_expense, resolve_participants
 from countbeans.services.errors import DomainError
@@ -225,20 +226,11 @@ async def cmd_addexpense(
     # an event, @all means the roster (an intentional subset), so this gate is
     # skipped — but a #general override is a whole-group general split, so it warns.
     if scoped_event is None and not named and not mentioned:
-        try:
-            actual = (
-                await bot.get_chat_member_count(message.chat.id) - 1
-            )  # minus the bot
-            if len(participants) < actual:
-                lines.append(
-                    coverage_gap_warning(len(participants), actual - len(participants))
-                )
-        except Exception:
-            logger.warning(
-                "could not fetch chat member count for %s",
-                message.chat.id,
-                exc_info=True,
-            )
+        warning = await whole_group_coverage_warning(
+            bot, message.chat.id, len(participants)
+        )
+        if warning is not None:
+            lines.append(warning)
 
     # A named subset split intentionally excludes the payer ("I paid, these owe
     # me") — but the everyday case is a shared expense the payer also took part
@@ -257,9 +249,7 @@ async def cmd_addexpense(
     # No per-reply nudge on ordinary event expenses — the scope echo above is the
     # signal, and #general is the one-step way to opt out (CLAUDE.md "Events").
     if force_general and ctx.active_event is not None:
-        lines.append(
-            f'\nℹ️ Logged as general — not tagged to "{ctx.active_event.name}".'
-        )
+        lines.append(general_override_note(ctx.active_event.name))
 
     lines.append(f"\n{VOID_HINT}")
     await message.reply("\n".join(lines))

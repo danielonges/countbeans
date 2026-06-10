@@ -118,6 +118,15 @@ def format_expense_receipt(
     return lines
 
 
+def general_override_note(event_name: str) -> str:
+    """The confirmation line appended when #general overrode an active event for
+    one expense — a deliberate escape-hatch use stays visible (CLAUDE.md "The
+    #general write-scope override"). One definition so the inline handler and
+    the wizard can't drift; /settleup keeps its own "Recorded as general"
+    wording."""
+    return f'\nℹ️ Logged as general — not tagged to "{event_name}".'
+
+
 def coverage_gap_warning(known_count: int, gap: int) -> str:
     """The non-blocking warning appended when a whole-group split can only cover
     the members the bot has met. ``known_count`` is who's in the split; ``gap`` is

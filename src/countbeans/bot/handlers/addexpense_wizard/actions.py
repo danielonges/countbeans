@@ -18,12 +18,13 @@ from pydantic import ValidationError
 
 from countbeans.bot.utils.formatting import (
     VOID_HINT,
-    coverage_gap_warning,
     display_name,
     format_expense_receipt,
     format_money,
+    general_override_note,
     humanize_validation_error,
 )
+from countbeans.bot.utils.replies import whole_group_coverage_warning
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.services.add_expense import add_expense
 from countbeans.services.errors import DomainError
@@ -427,23 +428,16 @@ async def _submit(
         )
     # A #general override while an event is active: confirm it stayed general.
     if event_id is None and data.get("active_event_id"):
-        lines.append(
-            f'\nℹ️ Logged as general — not tagged to "{data.get("active_event_name")}".'
-        )
+        event_name = data.get("active_event_name")
+        assert event_name is not None  # set together with active_event_id
+        lines.append(general_override_note(event_name))
     # Splitting the whole known group in general scope: warn if the bot can't see
     # everyone yet (mirrors the inline coverage check — independent of the override
     # nudge above, so a #general whole-group split gets both, exactly as inline).
     if event_id is None and len(selected) == len(roster):
-        try:
-            actual = await bot.get_chat_member_count(chat_id) - 1  # minus the bot
-            if len(selected) < actual:
-                lines.append(
-                    coverage_gap_warning(len(selected), actual - len(selected))
-                )
-        except Exception:
-            logger.warning(
-                "could not fetch chat member count for %s", chat_id, exc_info=True
-            )
+        warning = await whole_group_coverage_warning(bot, chat_id, len(selected))
+        if warning is not None:
+            lines.append(warning)
 
     lines.append(f"\n{VOID_HINT}")
     await _edit_anchor(bot, chat_id, data, "\n".join(lines), None)
