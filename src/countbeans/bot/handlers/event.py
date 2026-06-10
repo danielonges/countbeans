@@ -40,6 +40,7 @@ from countbeans.dto.commands import (
 )
 from countbeans.dto.domain import MemberInfo
 from countbeans.services.balance import compute_balances
+from countbeans.services.errors import DomainError
 from countbeans.services.events import (
     add_group_to_roster,
     close_event,
@@ -175,7 +176,7 @@ async def _new(
                 default_currency=currency,
             ),
         )
-    except ValueError as exc:
+    except DomainError as exc:
         await message.reply(str(exc))
         return
 

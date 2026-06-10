@@ -24,6 +24,7 @@ from countbeans.dto.commands import (
 )
 from countbeans.dto.results import EventCreatedResult
 
+from .errors import DomainError
 from .uow import UnitOfWork
 
 
@@ -42,7 +43,7 @@ async def create_event(uow: UnitOfWork, cmd: CreateEventCommand) -> EventCreated
         cmd.default_currency,
     )
     if await uow.events.get_open(cmd.group_id) is not None:
-        raise ValueError(
+        raise DomainError(
             "An event is already open — close it with /event close before starting another."
         )
     event = Event(

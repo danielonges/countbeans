@@ -48,6 +48,7 @@ from countbeans.bot.utils.permissions import is_admin
 from countbeans.db.models import Group, User
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
+from countbeans.services.errors import DomainError
 from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
 from countbeans.services.uow import UnitOfWork
 
@@ -395,7 +396,7 @@ async def _record(
     created_by: uuid.UUID,
 ) -> SettlementCreatedResult | None:
     """Build the command and record the settlement, replying with the error and
-    returning None on a validation/ledger failure. settle_up raises ValueError
+    returning None on a validation/ledger failure. settle_up raises DomainError
     with a user-facing message when the settlement breaks a ledger rule (no
     suggested payment in that direction, or the amount exceeds what's owed)."""
     try:
@@ -415,7 +416,7 @@ async def _record(
 
     try:
         return await settle_up(uow, cmd, simplify_debts=group.simplify_debts)
-    except ValueError as exc:
+    except DomainError as exc:
         await message.reply(str(exc))
         return None
 

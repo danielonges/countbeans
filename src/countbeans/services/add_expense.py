@@ -12,6 +12,7 @@ from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.dto.domain import MemberInfo
 from countbeans.dto.results import ExpenseCreatedResult
 
+from .errors import DomainError
 from .uow import UnitOfWork
 
 Id = uuid.UUID
@@ -104,7 +105,7 @@ def apportion(amount_cents: int, weights: dict[Id, int]) -> dict[Id, int]:
     """
     total = sum(weights.values())
     if total <= 0:
-        raise ValueError("weights must sum to a positive value")
+        raise DomainError("weights must sum to a positive value")
     shares: dict[Id, int] = {}
     remainders: list[tuple[int, Id]] = []
     allocated = 0
@@ -134,14 +135,16 @@ def compute_shares(
         case "percent":
             assert params is not None
             if sum(params.values()) != 100:
-                raise ValueError("percentages must sum to 100")
+                raise DomainError("percentages must sum to 100")
             return apportion(amount_cents, params)
         case "exact":
             assert params is not None
             if sum(params.values()) != amount_cents:
-                raise ValueError("exact shares must sum to the expense amount")
+                raise DomainError("exact shares must sum to the expense amount")
             return dict(params)
         case _:
+            # Unreachable through a validated command (split_mode is a Literal) —
+            # a programming-error guard, so deliberately NOT a DomainError.
             raise ValueError(f"unknown split mode: {mode}")
 
 

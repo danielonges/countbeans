@@ -35,6 +35,7 @@ from countbeans.bot.utils.parsing import (
 )
 from countbeans.dto.commands import AddExpenseCommand, MentionedUser
 from countbeans.services.add_expense import add_expense, resolve_participants
+from countbeans.services.errors import DomainError
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -210,11 +211,11 @@ async def cmd_addexpense(
         await message.reply(f"Invalid command: {humanize_validation_error(exc)}")
         return
 
-    # add_expense raises ValueError with a user-facing message when a split
+    # add_expense raises DomainError with a user-facing message when a split
     # doesn't reconcile (percentages ≠ 100, exact shares ≠ amount, etc.).
     try:
         result = await add_expense(uow, cmd)
-    except ValueError as exc:
+    except DomainError as exc:
         await message.reply(str(exc))
         return
 

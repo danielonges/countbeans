@@ -57,6 +57,7 @@ from countbeans.bot.utils.parsing import (
 from countbeans.dto.commands import AddExpenseCommand
 from countbeans.dto.domain import MemberInfo
 from countbeans.services.add_expense import add_expense
+from countbeans.services.errors import DomainError
 from countbeans.services.uow import UnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -496,7 +497,7 @@ async def _submit(
 
     try:
         result = await add_expense(uow, cmd)
-    except ValueError as exc:
+    except DomainError as exc:
         await state.update_data(submitting=False)
         await callback.answer(str(exc), show_alert=True)
         return

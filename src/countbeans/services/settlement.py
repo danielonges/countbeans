@@ -12,6 +12,7 @@ from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
 
 from .balance import suggested_owed, suggested_owed_by_currency, suggested_transfers
+from .errors import DomainError
 from .uow import UnitOfWork
 
 
@@ -50,8 +51,7 @@ async def settle_up(
         cmd.currency,
         cmd.event_id,
     )
-    if cmd.from_user_id == cmd.to_user_id:
-        raise ValueError("from_user_id and to_user_id must be different users")
+    # from != to is guaranteed by SettleUpCommand's users_must_differ validator.
 
     # A settlement is only valid *along a suggested transfer*, and never for more
     # than that transfer's amount — so balances can never flip (CLAUDE.md
@@ -67,12 +67,12 @@ async def settle_up(
         simplify_debts=simplify_debts,
     )
     if owed <= 0:
-        raise ValueError(
+        raise DomainError(
             f"That settlement isn't a suggested payment in {cmd.currency} — no "
             "debt runs in that direction. Run /balance all to see who owes whom."
         )
     if cmd.amount_cents > owed:
-        raise ValueError(
+        raise DomainError(
             f"Only {_fmt(owed, cmd.currency)} is owed in that direction — settle "
             "that or less, or omit the amount to settle in full."
         )
