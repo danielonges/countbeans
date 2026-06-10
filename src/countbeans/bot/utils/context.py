@@ -8,6 +8,7 @@ recompute by hand (effective event, currency fallback, the scope-note reply
 fragment).
 """
 
+import logging
 import uuid
 from dataclasses import dataclass, replace
 
@@ -15,6 +16,8 @@ from aiogram.types import Message
 
 from countbeans.db.models import Event, Group, User
 from countbeans.services.uow import UnitOfWork
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -85,5 +88,13 @@ async def resolve_chat_context(uow: UnitOfWork, message: Message) -> ChatContext
     await uow.group_members.ensure_member(group.id, caller.id)
     active_event = (
         await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
+    # The one place every group command resolves its scope — log it so a
+    # mis-filed write (wrong event vs general) is traceable to this decision.
+    logger.debug(
+        "chat context: group=%s caller=%s active_event=%s",
+        group.id,
+        caller.id,
+        active_event.id if active_event else None,
     )
     return ChatContext(group=group, caller=caller, active_event=active_event)

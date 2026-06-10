@@ -390,6 +390,7 @@ async def _submit(
             created_by=payer_id,
         )
     except ValidationError as exc:
+        logger.warning("Invalid wizard expense draft: %s", exc)
         await state.update_data(submitting=False)
         await callback.answer(
             f"Invalid: {humanize_validation_error(exc)}", show_alert=True
