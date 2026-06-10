@@ -26,13 +26,13 @@ import uuid
 from aiogram import Bot, Router
 from aiogram.enums import MessageEntityType
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import Message, User
 
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import extract_quoted_description, is_all
 from countbeans.bot.utils.permissions import is_admin
-from countbeans.db.models import Group
+from countbeans.db.models import Event, Group
 from countbeans.dto.commands import (
     CreateEventCommand,
     EditEventRosterCommand,
@@ -232,6 +232,8 @@ async def _close(message: Message, uow: UnitOfWork, group: Group) -> None:
 async def _roster(
     message: Message, uow: UnitOfWork, group: Group, action: str, rest: str
 ) -> None:
+    """Dispatch a roster edit to its grammar: a text_mention (add only), the
+    reserved @all keyword (add only), or a single typed @handle."""
     open_event = await uow.events.get_open(group.id)
     if open_event is None:
         await message.reply('No open event. Start one with /event new "<name>" first.')
@@ -249,35 +251,9 @@ async def _roster(
         None,
     )
     if action == "add" and text_mention is not None and text_mention.user is not None:
-        tu = text_mention.user
-        user = await uow.users.upsert(
-            telegram_user_id=tu.id,
-            username=tu.username,
-            first_name=tu.first_name,
-            last_name=tu.last_name,
-            claim_in_group=group.id,
+        await _roster_add_text_mention(
+            message, uow, group, open_event, text_mention.user
         )
-        await uow.group_members.ensure_member(group.id, user.id)
-        changed = await edit_event_roster(
-            uow,
-            EditEventRosterCommand(
-                event_id=open_event.id, user_id=user.id, action="add"
-            ),
-        )
-        logger.info(
-            "Event roster add (text_mention): event_id=%s user_id=%s changed=%s",
-            open_event.id,
-            user.id,
-            changed,
-        )
-        label = display_name(user.username, user.first_name)
-        note = (
-            f'Added {label} to "{open_event.name}".'
-            if changed
-            else f"{label} is already on the roster."
-        )
-        roster = await uow.events.list_members(open_event.id)
-        await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
         return
 
     mention = _MENTION_RE.search(rest)
@@ -291,62 +267,119 @@ async def _roster(
     # the roster; on `remove` it has no meaning — name a specific member.
     if is_all(handle):
         if action == "add":
-            added = await add_group_to_roster(uow, group.id, open_event.id)
-            logger.info(
-                "Event roster add @all: event_id=%s added=%d", open_event.id, added
+            await _roster_add_all(message, uow, group, open_event)
+        else:
+            await message.reply(
+                "@all isn't removable — name a specific @user to take off the roster."
             )
-            note = (
-                f'Added {added} group member(s) to "{open_event.name}".'
-                if added
-                else f'Everyone I know is already on the "{open_event.name}" roster.'
-            )
-            roster = await uow.events.list_members(open_event.id)
-            await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
-            return
-        await message.reply(
-            "@all isn't removable — name a specific @user to take off the roster."
-        )
         return
 
     if action == "add":
-        # Naming someone unseen is fine here — it tracks them as a placeholder,
-        # exactly like /addexpense.
-        user = await uow.users.resolve_mention(handle)
-        await uow.group_members.ensure_member(group.id, user.id)
-        changed = await edit_event_roster(
-            uow,
-            EditEventRosterCommand(
-                event_id=open_event.id, user_id=user.id, action="add"
-            ),
-        )
-        note = (
-            f'Added @{handle} to "{open_event.name}".'
-            if changed
-            else f"@{handle} is already on the roster."
-        )
-    else:  # remove
-        user = await uow.users.find_by_mention(handle)
-        if user is None:
-            await message.reply(f"I don't know @{handle} — nothing to remove.")
-            return
-        changed = await edit_event_roster(
-            uow,
-            EditEventRosterCommand(
-                event_id=open_event.id, user_id=user.id, action="remove"
-            ),
-        )
-        if not changed:
-            await message.reply(f'@{handle} isn\'t on the "{open_event.name}" roster.')
-            return
-        note = f'Removed @{handle} from "{open_event.name}".'
+        await _roster_add_handle(message, uow, group, open_event, handle)
+    else:
+        await _roster_remove_handle(message, uow, open_event, handle)
 
+
+async def _roster_add_text_mention(
+    message: Message, uow: UnitOfWork, group: Group, open_event: Event, tu: User
+) -> None:
+    user = await uow.users.upsert(
+        telegram_user_id=tu.id,
+        username=tu.username,
+        first_name=tu.first_name,
+        last_name=tu.last_name,
+        claim_in_group=group.id,
+    )
+    await uow.group_members.ensure_member(group.id, user.id)
+    changed = await edit_event_roster(
+        uow,
+        EditEventRosterCommand(event_id=open_event.id, user_id=user.id, action="add"),
+    )
     logger.info(
-        "Event roster %s: event_id=%s user_id=%s changed=%s",
-        action,
+        "Event roster add (text_mention): event_id=%s user_id=%s changed=%s",
         open_event.id,
         user.id,
         changed,
     )
+    label = display_name(user.username, user.first_name)
+    note = (
+        f'Added {label} to "{open_event.name}".'
+        if changed
+        else f"{label} is already on the roster."
+    )
+    await _reply_with_roster(message, uow, open_event, note)
+
+
+async def _roster_add_all(
+    message: Message, uow: UnitOfWork, group: Group, open_event: Event
+) -> None:
+    added = await add_group_to_roster(uow, group.id, open_event.id)
+    logger.info("Event roster add @all: event_id=%s added=%d", open_event.id, added)
+    note = (
+        f'Added {added} group member(s) to "{open_event.name}".'
+        if added
+        else f'Everyone I know is already on the "{open_event.name}" roster.'
+    )
+    await _reply_with_roster(message, uow, open_event, note)
+
+
+async def _roster_add_handle(
+    message: Message, uow: UnitOfWork, group: Group, open_event: Event, handle: str
+) -> None:
+    # Naming someone unseen is fine here — it tracks them as a placeholder,
+    # exactly like /addexpense.
+    user = await uow.users.resolve_mention(handle)
+    await uow.group_members.ensure_member(group.id, user.id)
+    changed = await edit_event_roster(
+        uow,
+        EditEventRosterCommand(event_id=open_event.id, user_id=user.id, action="add"),
+    )
+    logger.info(
+        "Event roster add: event_id=%s user_id=%s changed=%s",
+        open_event.id,
+        user.id,
+        changed,
+    )
+    note = (
+        f'Added @{handle} to "{open_event.name}".'
+        if changed
+        else f"@{handle} is already on the roster."
+    )
+    await _reply_with_roster(message, uow, open_event, note)
+
+
+async def _roster_remove_handle(
+    message: Message, uow: UnitOfWork, open_event: Event, handle: str
+) -> None:
+    user = await uow.users.find_by_mention(handle)
+    if user is None:
+        await message.reply(f"I don't know @{handle} — nothing to remove.")
+        return
+    changed = await edit_event_roster(
+        uow,
+        EditEventRosterCommand(
+            event_id=open_event.id, user_id=user.id, action="remove"
+        ),
+    )
+    if not changed:
+        await message.reply(f'@{handle} isn\'t on the "{open_event.name}" roster.')
+        return
+    logger.info(
+        "Event roster remove: event_id=%s user_id=%s changed=%s",
+        open_event.id,
+        user.id,
+        changed,
+    )
+    await _reply_with_roster(
+        message, uow, open_event, f'Removed @{handle} from "{open_event.name}".'
+    )
+
+
+async def _reply_with_roster(
+    message: Message, uow: UnitOfWork, open_event: Event, note: str
+) -> None:
+    """The shared reply tail of every roster edit: re-fetch the members and echo
+    the updated roster under the outcome note."""
     roster = await uow.events.list_members(open_event.id)
     await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
 
