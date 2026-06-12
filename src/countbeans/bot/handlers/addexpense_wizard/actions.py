@@ -31,10 +31,10 @@ from countbeans.services.errors import DomainError
 from countbeans.services.uow import UnitOfWork
 
 from .render import (
-    _MODE_DISPLAY,
     _SHARE_HINTS,
     _edit_anchor,
     _mention_prefix,
+    _one_liner_tip,
     _repaint,
 )
 from .states import (
@@ -78,6 +78,10 @@ async def on_wizard_action(
 
     if action == "x":
         await _cancel(callback, bot, chat_id, state, data)
+    elif action == "eq":
+        await _add_equal(callback, state, uow, bot, chat_id)
+    elif action == "amt":
+        await _prompt_amount(callback, bot, chat_id, state)
     elif action == "desc":
         await _prompt_description(callback, bot, chat_id, state)
     elif action == "gen":
@@ -123,6 +127,39 @@ async def _cancel(
     await state.clear()
     await _edit_anchor(bot, chat_id, data, "✖ Expense cancelled.", None)
     await callback.answer("Cancelled")
+
+
+async def _add_equal(
+    callback: CallbackQuery,
+    state: FSMContext,
+    uow: UnitOfWork,
+    bot: Bot,
+    chat_id: int,
+) -> None:
+    """The roster screen's fast path: an equal split needs no mode screen and no
+    separate confirm — the roster anchor already previews the whole draft, and
+    /void is the undo, mirroring the inline one-liner's record-then-void model.
+    Equal is forced in case an abandoned uneven attempt left another mode in the
+    draft; ``_submit`` re-reads the draft and owns every guard."""
+    await state.update_data(split_mode="equal", shares={})
+    await _submit(callback, state, uow, bot, chat_id)
+
+
+async def _prompt_amount(
+    callback: CallbackQuery, bot: Bot, chat_id: int, state: FSMContext
+) -> None:
+    """✏️ — re-ask for the amount mid-flow (a mistyped amount must not force a
+    cancel-and-restart). Re-enters the amount state; ``on_amount`` sees the
+    roster already exists and returns here with the selection intact."""
+    prompt = await bot.send_message(
+        chat_id,
+        f"{_mention_prefix(callback.from_user)}✏️ Send the new amount — e.g. "
+        "30 or 30.50 (prefix a currency to change it: $50, €50, USD50).",
+        reply_markup=ForceReply(selective=True),
+    )
+    await state.update_data(prompt_id=prompt.message_id)
+    await state.set_state(AddExpenseFlow.amount)
+    await callback.answer()
 
 
 async def _prompt_description(
@@ -246,13 +283,13 @@ async def _back(
 async def _set_mode(
     callback: CallbackQuery, bot: Bot, chat_id: int, state: FSMContext, mode: str
 ) -> None:
-    if mode not in _MODE_DISPLAY:
+    # Only the uneven modes — an equal split commits straight from the roster
+    # screen (ax:eq), so "equal" here is a crafted callback, not a button.
+    if mode not in ("exact", "percent", "weighted"):
         await callback.answer()
         return
     await state.update_data(split_mode=mode, shares={})
-    await state.set_state(
-        AddExpenseFlow.confirm if mode == "equal" else AddExpenseFlow.share_entry
-    )
+    await state.set_state(AddExpenseFlow.share_entry)
     await _repaint(bot, chat_id, state)
     await callback.answer()
 
@@ -440,6 +477,12 @@ async def _submit(
         if warning is not None:
             lines.append(warning)
 
+    # Teach the accelerator where it lands: the one-liner that would have done
+    # exactly this in a single message (equal splits only; skipped when it
+    # can't be reconstructed faithfully — see _one_liner_tip).
+    tip = _one_liner_tip(data)
+    if tip is not None:
+        lines.append(f"\n💡 Faster next time: {tip}")
     lines.append(f"\n{VOID_HINT}")
     await _edit_anchor(bot, chat_id, data, "\n".join(lines), None)
     await callback.answer("Added ✅")

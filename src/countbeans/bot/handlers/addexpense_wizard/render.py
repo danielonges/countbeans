@@ -8,6 +8,7 @@ vocabulary.
 """
 
 import logging
+import re
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
@@ -21,6 +22,7 @@ from aiogram.types import (
 )
 
 from countbeans.bot.utils.formatting import display_name, format_money
+from countbeans.bot.utils.parsing import GENERAL_KEYWORD
 
 from .states import AddExpenseFlow, WizardDraft, _is_reconciled, _scope_label, get_draft
 
@@ -65,9 +67,10 @@ def _summary_lines(data: WizardDraft) -> list[str]:
 
 
 def _render_participants(data: WizardDraft) -> tuple[str, InlineKeyboardMarkup]:
+    # No "Split:" line here — the roster screen doesn't own a mode; the two
+    # commit buttons below say what each tap does.
     selected = set(data.get("selected", []))
     lines = _summary_lines(data)
-    lines.append(f"Split: {_MODE_DISPLAY[data['split_mode']]}")
     lines.append("")
     lines.append(f"Who's in? ({len(selected)} selected) — tap a name to toggle:")
     return "\n".join(lines), _participants_keyboard(data, selected)
@@ -86,13 +89,13 @@ def _participants_keyboard(
     for idx in range(start, end):
         member = roster[idx]
         mark = "✅" if idx in selected else "⬜"
+        name = display_name(member["username"], member["first_name"])
+        if member["is_pending"]:
+            # A placeholder (mentioned but never seen) — flag it where people
+            # are chosen, so a typo'd handle is caught at the decision point.
+            name += " ⏳"
         rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{mark} {display_name(member['username'], member['first_name'])}",
-                    callback_data=f"ax:p:{idx}",
-                )
-            ]
+            [InlineKeyboardButton(text=f"{mark} {name}", callback_data=f"ax:p:{idx}")]
         )
 
     nav: list[InlineKeyboardButton] = []
@@ -110,19 +113,39 @@ def _participants_keyboard(
         ]
     )
 
-    util = [InlineKeyboardButton(text="📝 Description", callback_data="ax:desc")]
-    if data.get("active_event_id"):
-        util.append(
-            InlineKeyboardButton(
-                text="📂 Use event" if data.get("force_general") else "📂 #general",
-                callback_data="ax:gen",
-            )
-        )
-    rows.append(util)
-
     rows.append(
         [
-            InlineKeyboardButton(text="Split ▶", callback_data="ax:pdone"),
+            InlineKeyboardButton(text="✏️ Amount", callback_data="ax:amt"),
+            InlineKeyboardButton(text="📝 Description", callback_data="ax:desc"),
+        ]
+    )
+    if data.get("active_event_id"):
+        # Plain words, not the #general keyword — the button must make sense to
+        # someone who has never read the grammar (the keyword stays in the
+        # one-liner, the tip, and /event info).
+        event_name = data.get("active_event_name") or "the event"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        f"📂 Tag to {event_name}"
+                        if data.get("force_general")
+                        else f"📂 Don't tag to {event_name}"
+                    ),
+                    callback_data="ax:gen",
+                )
+            ]
+        )
+
+    # The fast path: an equal split commits straight from this screen — the
+    # anchor above already previews the draft, and /void is the undo, exactly
+    # like the inline one-liner. The mode screen is only for uneven splits.
+    rows.append(
+        [InlineKeyboardButton(text="✅ Add — split equally", callback_data="ax:eq")]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(text="Uneven split ▶", callback_data="ax:pdone"),
             InlineKeyboardButton(text="✖ Cancel", callback_data="ax:x"),
         ]
     )
@@ -130,16 +153,14 @@ def _participants_keyboard(
 
 
 def _render_split_mode(data: WizardDraft) -> tuple[str, InlineKeyboardMarkup]:
+    # Equal isn't offered here — it commits straight from the roster screen.
     lines = _summary_lines(data)
     lines.append("")
     lines.append(f"How should it split among {len(data.get('selected', []))}?")
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Equal", callback_data="ax:m:equal"),
                 InlineKeyboardButton(text="Exact", callback_data="ax:m:exact"),
-            ],
-            [
                 InlineKeyboardButton(text="Percent", callback_data="ax:m:percent"),
                 InlineKeyboardButton(text="Weight", callback_data="ax:m:weighted"),
             ],
@@ -197,52 +218,63 @@ def _render_share_entry(data: WizardDraft) -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _render_confirm(data: WizardDraft) -> tuple[str, InlineKeyboardMarkup]:
-    mode = data["split_mode"]
-    currency = data["currency"]
-    selected = data.get("selected", [])
-    roster = data["roster"]
-    shares = data.get("shares", {})
-
-    lines = [
-        "🧾 Confirm expense",
-        f"Amount: {format_money(data['amount_cents'], currency)}",
-        f"For: {data['description']}" if data.get("description") else "For: —",
-        f"Scope: {_scope_label(data)}",
-        f"Paid by: {display_name(data.get('payer_username'), data.get('payer_first_name'))}",
-        "",
-    ]
-    names = ", ".join(
-        display_name(roster[i]["username"], roster[i]["first_name"]) for i in selected
-    )
-    if mode == "equal":
-        lines.append(f"Split equally among {len(selected)}: {names}")
-    else:
-        lines.append(f"Split by {_MODE_DISPLAY[mode].lower()}:")
-        for i in selected:
-            member = roster[i]
-            lines.append(
-                f"  {display_name(member['username'], member['first_name'])}: "
-                f"{_fmt_share(shares.get(str(i)), mode, currency)}"
-            )
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Confirm", callback_data="ax:ok")],
-            [
-                InlineKeyboardButton(text="◀ Back", callback_data="ax:back"),
-                InlineKeyboardButton(text="✖ Cancel", callback_data="ax:x"),
-            ],
-        ]
-    )
-    return "\n".join(lines), kb
-
-
 _RENDERERS = {
     AddExpenseFlow.participants.state: _render_participants,
     AddExpenseFlow.split_mode.state: _render_split_mode,
     AddExpenseFlow.share_entry.state: _render_share_entry,
-    AddExpenseFlow.confirm.state: _render_confirm,
 }
+
+
+# ---------------------------------------------------------------------------
+# The one-liner teaching tip (appended to the wizard receipt)
+# ---------------------------------------------------------------------------
+
+# Characters in a description the one-liner grammar could mis-parse — mention
+# markers, the #-flag namespace, any quote opener/closer, the escape char, a
+# newline. The tip is skipped rather than risk teaching a command that wouldn't
+# round-trip.
+_TIP_UNSAFE = re.compile(r"[@#\\\"'`«»“”‘’\n]")
+
+
+def _fmt_plain_amount(cents: int) -> str:
+    """An amount as the user would type it: ``50`` or ``50.25`` (no currency)."""
+    return f"{cents // 100}.{cents % 100:02d}" if cents % 100 else str(cents // 100)
+
+
+def _one_liner_tip(data: WizardDraft) -> str | None:
+    """The one-liner equivalent of a submitted draft, or ``None`` when it can't
+    be reconstructed faithfully (uneven split, a selected member without a
+    public @username, a description the grammar would mis-parse).
+
+    Appended to the wizard receipt as a teaching footer: the wizard is the
+    recognition path and the one-liner the recall path — showing the exact
+    command the wizard just performed is how users graduate from taps to the
+    one-message fast path.
+    """
+    if data["split_mode"] != "equal":
+        return None
+    description = data.get("description")
+    if description and _TIP_UNSAFE.search(description):
+        return None
+    amount = _fmt_plain_amount(data["amount_cents"])
+    if data["currency"] != data["currency_default"]:
+        amount = f"{data['currency']}{amount}"
+    parts = ["/addexpense", amount]
+    if description:
+        parts.append(description)
+    selected = data.get("selected", [])
+    roster = data.get("roster", [])
+    # Everyone selected ⇄ no mentions (the inline "split everyone" default);
+    # a subset is spelled out as @handles.
+    if len(selected) != len(roster):
+        for i in selected:
+            handle = roster[i]["username"]
+            if handle is None:
+                return None
+            parts.append(f"@{handle}")
+    if data.get("force_general") and data.get("active_event_id"):
+        parts.append(f"#{GENERAL_KEYWORD}")
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------

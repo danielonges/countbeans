@@ -317,6 +317,18 @@ def parse_money(token: str, default_currency: str) -> tuple[str, int]:
     return currency, cents
 
 
+def looks_like_money(token: str) -> bool:
+    """Whether ``token`` would parse as an amount (with or without a currency
+    marker). A diagnostic predicate for "an amount, but in the wrong place"
+    nudges — /addexpense's wrong-order hint and the wizard's non-reply nudge —
+    never used to record money, so the default currency passed is irrelevant."""
+    try:
+        parse_money(token, "USD")
+    except ValueError:
+        return False
+    return True
+
+
 def parse_amount_cents(s: str) -> int:
     """Parse a decimal string (max 2 dp) to integer cents without using float.
 

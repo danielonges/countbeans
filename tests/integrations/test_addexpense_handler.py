@@ -248,3 +248,81 @@ async def test_addexpense_exact_wrong_sum_rejected_no_side_effects(
     users = UserRepository(session)
     assert await users.find_by_mention("alice") is None
     assert await users.find_by_mention("bob") is None
+
+
+async def test_wrong_order_args_get_position_hint(
+    dispatcher, session: AsyncSession
+) -> None:
+    # `/addexpense dinner 50` — the amount is valid, only misplaced. The error
+    # must diagnose the position, not claim the amount was invalid.
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/addexpense dinner 50", from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "amount comes first" in (bot.last_reply or "")
+    assert await _expense_count(session) == 0
+
+
+async def test_no_amount_anywhere_keeps_generic_error(
+    dispatcher, session: AsyncSession
+) -> None:
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message('/addexpense notmoney "Lunch" @bob', from_id=1001),
+        session=session,
+    )
+    assert "Invalid amount" in (bot.last_reply or "")
+    assert await _expense_count(session) == 0
+
+
+async def test_add_alias_records_expense(dispatcher, session: AsyncSession) -> None:
+    # /add is the unpublished typed accelerator for /addexpense.
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message('/add 10 "Lunch" @bob', from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "Added expense" in (bot.last_reply or "")
+    assert await _expense_count(session) == 1
+
+
+async def test_receipt_marks_pending_placeholder(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A mentioned-but-unseen @handle joins the split as a placeholder — the
+    # receipt must say so, making a typo'd handle visible immediately.
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message('/addexpense 10 "Lunch" @bob', from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "@bob (hasn't joined yet)" in (bot.last_reply or "")
+
+
+async def test_equal_split_collapses_to_each_line(
+    dispatcher, session: AsyncSession
+) -> None:
+    # An even split prints one "X each" line, not N identical share lines.
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/addexpense 30 dinner", from_id=1001, username="caller"),
+        session=session,
+    )
+    reply = bot.last_reply or ""
+    assert "SGD 15.00 each" in reply
+    assert "Shares" not in reply

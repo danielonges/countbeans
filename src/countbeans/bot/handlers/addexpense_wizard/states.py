@@ -20,12 +20,14 @@ from countbeans.services.uow import UnitOfWork
 
 
 class AddExpenseFlow(StatesGroup):
-    amount = State()  # awaiting a ForceReply with the amount
+    amount = State()  # awaiting a ForceReply with the amount (entry or ✏️ edit)
     description = State()  # awaiting a ForceReply with the description
     participants = State()  # anchor showing the member-toggle roster
-    split_mode = State()  # anchor showing the four split-mode buttons
+    split_mode = State()  # anchor showing the three uneven split-mode buttons
     share_entry = State()  # anchor collecting per-person shares (non-equal)
-    confirm = State()  # anchor showing the final preview
+    # No confirm state: an equal split commits straight from the roster anchor
+    # (which already previews the draft; /void is the undo, as inline), and an
+    # uneven split commits from the share screen's reconciliation-gated Confirm.
 
 
 class RosterMember(TypedDict):

@@ -9,7 +9,8 @@ points (and stays in step with server.py's terse command-menu descriptions)."""
 # point at once.
 COMMAND_REFERENCE = (
     "Commands:\n"
-    '• /addexpense <amount> "<desc>" [@user …] — record an expense\n'
+    '• /addexpense <amount> "<desc>" [@user …] — record an expense '
+    "(/add works too; send it bare for a guided, button-based flow)\n"
     "• /balance [all] — your net position, or every member's with /balance all\n"
     "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
     "• /void — undo your most recent expense\n"

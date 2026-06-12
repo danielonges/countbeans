@@ -59,6 +59,15 @@ def display_name(username: str | None, first_name: str | None) -> str:
     return "someone"
 
 
+def display_member(member: MemberInfo) -> str:
+    """``display_name`` plus a pending marker: a placeholder participant
+    (mentioned but never seen) reads ``@handle (hasn't joined yet)``, so a
+    typo'd @handle is visible in the receipt the moment it spawns a ghost —
+    not weeks later when balances look wrong."""
+    name = display_name(member.username, member.first_name)
+    return f"{name} (hasn't joined yet)" if member.is_pending else name
+
+
 _SPLIT_MODE_LABELS = {
     "exact": " (by exact amount)",
     "percent": " (by percentage)",
@@ -108,13 +117,20 @@ def format_expense_receipt(
     lines = [
         head,
         f"Paid by: {display_name(payer_username, payer_first_name)}",
-        f"Split among: {', '.join(display_name(p.username, p.first_name) for p in participants)}",
-        f"Shares{mode_label}:",
+        f"Split among: {', '.join(display_member(p) for p in participants)}",
     ]
-    for p in participants:
-        lines.append(
-            f"  {display_name(p.username, p.first_name)}: {format_money(shares.get(p.user_id, 0), currency)}"
-        )
+    # An even split needs one line, not N identical ones; a largest-remainder
+    # split (some shares a cent more) keeps the itemized list, as does a single
+    # participant ("each" reads wrong for one person).
+    share_values = [shares.get(p.user_id, 0) for p in participants]
+    if split_mode == "equal" and len(share_values) > 1 and len(set(share_values)) == 1:
+        lines.append(f"{format_money(share_values[0], currency)} each")
+    else:
+        lines.append(f"Shares{mode_label}:")
+        for p in participants:
+            lines.append(
+                f"  {display_name(p.username, p.first_name)}: {format_money(shares.get(p.user_id, 0), currency)}"
+            )
     return lines
 
 

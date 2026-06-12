@@ -14,7 +14,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import ForceReply, Message
 
 from countbeans.bot.utils.context import resolve_chat_context
-from countbeans.bot.utils.parsing import extract_quoted_description, parse_money
+from countbeans.bot.utils.parsing import (
+    extract_quoted_description,
+    looks_like_money,
+    parse_money,
+)
 from countbeans.services.uow import UnitOfWork
 
 from .render import (
@@ -111,15 +115,46 @@ async def on_amount(
             message, state, "Invalid amount. Send a positive number like 25.50."
         )
         return
+    rest = text[len(tokens[0]) :].strip()
+    if "roster" in data:
+        # ✏️ Amount re-entry from the roster (the roster only exists once the
+        # participants step has opened): update the money — and the description
+        # only when new text follows the amount — keep the selection, and return
+        # to the roster with the 📝 description step's chrome.
+        await state.update_data(amount_cents=amount_cents, currency=currency)
+        if rest:
+            await state.update_data(description=_description_from_rest(rest))
+        await state.set_state(AddExpenseFlow.participants)
+        await _drop_user_reply(bot, message)
+        await _clear_prompt(bot, message.chat.id, state)
+        await _resend_anchor(bot, message.chat.id, state)
+        return
     # Anything after the amount is an optional description — `50.25 dinner at
     # Domino's`. The description can be edited later via the 📝 button.
-    description = _description_from_rest(text[len(tokens[0]) :].strip())
+    description = _description_from_rest(rest)
     await state.update_data(
         amount_cents=amount_cents, currency=currency, description=description
     )
     # The opening prompt is kept, so the reply to it is kept too (symmetry); just
     # post the anchor below. Later steps (description/share) do drop the reply.
     await _open_participants(bot, message, state, uow)
+
+
+@router.message(
+    AddExpenseFlow.amount, F.text & ~F.text.startswith("/") & ~F.reply_to_message
+)
+async def on_amount_not_reply(message: Message) -> None:
+    """The initiator sent the amount as a plain message instead of a reply (the
+    ForceReply box was dismissed) — without this, the wizard's silence reads as
+    a dead bot. Nudge only when the text parses as an amount: anything else is
+    ordinary chatter they're having mid-wizard, and stays ignored."""
+    tokens = (message.text or "").split()
+    if not tokens or not looks_like_money(tokens[0]):
+        return
+    await message.reply(
+        "↩️ I only catch replies — tap reply on my prompt above and send the "
+        "amount again."
+    )
 
 
 @router.message(AddExpenseFlow.description, _TEXT_INPUT)

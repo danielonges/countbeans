@@ -4,9 +4,22 @@ import pytest
 
 from countbeans.bot.utils.parsing import (
     MAX_AMOUNT_CENTS,
+    looks_like_money,
     parse_amount_cents,
     parse_money,
 )
+
+
+# looks_like_money — the diagnostic predicate behind the "amount in the wrong
+# place" nudges (/addexpense's ordering hint, the wizard's non-reply nudge).
+@pytest.mark.parametrize("token", ["50", "25.50", "$50", "€50", "USD50", "usd50"])
+def test_looks_like_money_accepts_amount_tokens(token: str) -> None:
+    assert looks_like_money(token) is True
+
+
+@pytest.mark.parametrize("token", ["dinner", "@alice", "50%", "", "USD", "0"])
+def test_looks_like_money_rejects_non_amounts(token: str) -> None:
+    assert looks_like_money(token) is False
 
 
 def test_bare_number_uses_default_currency():

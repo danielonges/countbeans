@@ -1,4 +1,4 @@
-"""Bot handler for the /addexpense command.
+"""Bot handler for the /addexpense command (alias: /add).
 
 Parses: /addexpense <amount> ["<description>"] [@user1 @user2 ...]
 
@@ -30,6 +30,7 @@ from countbeans.bot.utils.formatting import (
 from countbeans.bot.utils.parsing import (
     extract_general_flag,
     extract_quoted_description,
+    looks_like_money,
     parse_money,
     parse_participants,
     unquoted_description,
@@ -45,7 +46,9 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(Command("addexpense"))
+# "add" is an unpublished alias — a typed accelerator that stays out of the
+# command menu (the canonical name is what the menu, help, and receipts teach).
+@router.message(Command("addexpense", "add"))
 async def cmd_addexpense(
     message: Message,
     command: CommandObject,
@@ -108,7 +111,15 @@ async def cmd_addexpense(
     try:
         currency, amount_cents = parse_money(tokens[0], ctx.currency)
     except ValueError:
-        await message.reply("Invalid amount. Use a positive number like 25.50")
+        # Diagnose the common ordering slip (`/addexpense dinner 50`): when a
+        # later token IS an amount, the problem is its position, not the number —
+        # don't tell the user their perfectly good amount was invalid.
+        if any(looks_like_money(t) for t in tokens[1:]):
+            await message.reply(
+                "The amount comes first — e.g. /addexpense 50 dinner @alice"
+            )
+        else:
+            await message.reply("Invalid amount. Use a positive number like 25.50")
         return
     # Parse the @mention region into participants + split mode. @all is bot-grammar
     # for "split everyone" (parse_participants drops it → an empty handle list

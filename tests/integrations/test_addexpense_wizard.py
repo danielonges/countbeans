@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, ExpenseShare, User
 
+from aiogram.types import InlineKeyboardMarkup
+
 from ._bot_harness import (
     MockedBot,
     feed,
@@ -19,7 +21,7 @@ from ._bot_harness import (
     make_callback,
     make_message,
 )
-from ._seed import seed_event, seed_group, seed_member
+from ._seed import seed_event, seed_group, seed_member, seed_placeholder
 
 # Every bot send in the harness is message_id 999, so the wizard anchor is 999;
 # the ownership gate binds taps to that anchor, so taps must carry the same id.
@@ -109,9 +111,7 @@ async def test_amount_line_accepts_inline_description(
     assert "For: 1 night at domino's pizza" in (bot.last_reply or "")
     assert "SGD 50.25" in (bot.last_reply or "")
 
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
     assert "1 night at domino's pizza" in (bot.last_edit or "")
     assert await _expense_count(session) == 1
 
@@ -229,12 +229,16 @@ async def test_everyone_equal_records_expense(
     # The roster opens with everyone selected (matches inline "no mentions = all").
     assert "3 selected" in (bot.last_reply or "")
 
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    # The equal split commits in ONE tap from the roster — no mode screen, no
+    # separate confirm (the anchor previews the draft; /void is the undo).
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
 
     assert "Added expense" in (bot.last_edit or "")
     assert "SGD 25.50" in (bot.last_edit or "")
+    # Identical equal shares collapse to one line instead of N.
+    assert "SGD 8.50 each" in (bot.last_edit or "")
+    # The receipt teaches the one-liner (everyone selected → no mentions).
+    assert "Faster next time: /addexpense 25.50" in (bot.last_edit or "")
     assert "/void" in (bot.last_edit or "")  # undo hint on the receipt
     assert await _expense_count(session) == 1
     assert await _shares_by_username(session) == {
@@ -254,9 +258,7 @@ async def test_everyone_split_warns_on_coverage_gap(
     bot = MockedBot(member_count=6)
     await _start_to_roster(dispatcher, bot, session, amount="10")
 
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
 
     assert "haven't interacted" in (bot.last_edit or "")
     assert await _expense_count(session) == 1
@@ -279,13 +281,13 @@ async def test_toggling_a_member_out_excludes_them(
     await feed_callback(dispatcher, bot, make_tap("ax:p:2"), session=session)
     assert "2 selected" in (bot.last_edit or "")
 
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
 
     shares = await _shares_by_username(session)
     assert shares == {"alice": 1500, "bob": 1500}
     assert "carol" not in shares
+    # A subset split's teaching tip spells out the @handles.
+    assert "Faster next time: /addexpense 30 @alice @bob" in (bot.last_edit or "")
 
 
 # --- exact split: reconcile gating -----------------------------------------
@@ -334,6 +336,8 @@ async def test_exact_split_blocks_until_reconciled(
         "bob": 1000,
         "carol": 1000,
     }
+    # The teaching tip is equal-split-only — an uneven receipt carries none.
+    assert "Faster next time" not in (bot.last_edit or "")
 
 
 async def test_bad_format_share_reasks_without_crashing(
@@ -361,6 +365,93 @@ async def test_bad_format_share_reasks_without_crashing(
     assert len(bot.sent) > sent_before  # a fresh re-ask was sent
     assert "percentage" in (bot.last_reply or "").lower()
     assert await _expense_count(session) == 0
+
+
+# --- ✏️ amount edit & fast-path hardening ------------------------------------
+
+
+async def test_amount_edit_keeps_selection_and_description(
+    dispatcher, session: AsyncSession
+) -> None:
+    # ✏️ Amount re-asks mid-flow: the new amount lands without resetting the
+    # toggled selection or the description (a mistyped amount used to mean
+    # cancel-and-restart).
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    await seed_member(session, group, telegram_user_id=3003, username="carol")
+    bot = MockedBot(member_count=4)
+    await _start_to_roster(dispatcher, bot, session, amount="30 team lunch")
+
+    # Drop carol, then re-enter the amount.
+    await feed_callback(dispatcher, bot, make_tap("ax:p:2"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:amt"), session=session)
+    assert "new amount" in (bot.last_reply or "")
+
+    await feed(
+        dispatcher,
+        bot,
+        make_message("40", from_id=1001, reply_to_message_id=999),
+        session=session,
+    )
+    anchor = bot.last_reply or ""
+    assert "SGD 40" in anchor  # the amount changed…
+    assert "For: team lunch" in anchor  # …the description survived…
+    assert "2 selected" in anchor  # …and so did the selection.
+
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
+    assert await _shares_by_username(session) == {"alice": 2000, "bob": 2000}
+
+
+async def test_crafted_equal_mode_callback_is_ignored(
+    dispatcher, session: AsyncSession
+) -> None:
+    # The mode screen no longer offers Equal — a crafted ax:m:equal must not
+    # move the flow (equal commits only via the roster's ax:eq).
+    group = await seed_group(session)
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="20")
+    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
+
+    edits_before = len(bot.edits)
+    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
+    assert len(bot.edits) == edits_before  # no repaint — the tap was a no-op
+    assert await _expense_count(session) == 0
+
+
+async def test_non_reply_amount_gets_nudge(dispatcher, session: AsyncSession) -> None:
+    # The reply box was dismissed and the amount arrives as a plain message: the
+    # wizard can't read it (free-text steps are reply-only), but silence reads
+    # as a dead bot — nudge exactly when the text parses as an amount (ordinary
+    # chatter stays ignored, see test_non_reply_chatter_does_not_advance).
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/addexpense", from_id=1001, username="alice"),
+        session=session,
+    )
+    await feed(dispatcher, bot, make_message("25.50", from_id=1001), session=session)
+    assert "repl" in (bot.last_reply or "").lower()  # "I only catch replies…"
+    assert await _expense_count(session) == 0
+
+
+async def test_roster_marks_pending_placeholder(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A placeholder (mentioned but never seen) is flagged ⏳ where people are
+    # chosen, so a typo'd @handle is caught at the decision point.
+    group = await seed_group(session)
+    await seed_placeholder(session, group, username="ghost")
+    bot = MockedBot(member_count=3)
+    await _start_to_roster(dispatcher, bot, session, amount="10")
+
+    markup = bot.sent[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup)
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("@ghost ⏳" in label for label in labels)
+    assert not any("⏳" in label for label in labels if "@alice" in label)
 
 
 # --- cancellation -----------------------------------------------------------
@@ -416,10 +507,8 @@ async def test_other_user_cannot_drive_draft(dispatcher, session: AsyncSession) 
     )
     assert "isn't your" in ((bot.last_answer and bot.last_answer.text) or "").lower()
 
-    # The draft is untouched: alice can still confirm everyone.
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    # The draft is untouched: alice can still commit everyone.
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
     assert await _expense_count(session) == 1
 
 
@@ -441,10 +530,8 @@ async def test_malformed_participant_index_is_ignored(
     await feed_callback(dispatcher, bot, make_tap("ax:p:99"), session=session)
     await feed_callback(dispatcher, bot, make_tap("ax:pg:xyz"), session=session)
 
-    # The draft is intact: both real members are still selected and it confirms.
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    # The draft is intact: both real members are still selected and it commits.
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
     assert await _expense_count(session) == 1
     assert set(await _shares_by_username(session)) == {"alice", "bob"}
 
@@ -467,19 +554,18 @@ async def test_malformed_share_index_is_ignored(
     assert await _expense_count(session) == 0
 
 
-async def test_confirm_is_guarded_against_double_submit(
+async def test_submit_is_guarded_against_double_tap(
     dispatcher, session: AsyncSession
 ) -> None:
-    # A double-tapped Confirm must not record the expense twice in the append-only
-    # ledger. The second callback sees the `submitting` flag the first set and
-    # bails. The harness is sequential, so simulate an in-flight first submit by
-    # pre-setting the flag, then feed the second tap.
+    # A double-tapped commit (the roster's equal fast path here) must not record
+    # the expense twice in the append-only ledger. The second callback sees the
+    # `submitting` flag the first set and bails. The harness is sequential, so
+    # simulate an in-flight first submit by pre-setting the flag, then feed the
+    # second tap.
     group = await seed_group(session)
     await seed_member(session, group, telegram_user_id=2002, username="bob")
     bot = MockedBot(member_count=3)
     await _start_to_roster(dispatcher, bot, session, amount="20")
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
 
     storage = dispatcher.storage
     key = next(iter(storage.storage))  # the single live draft (alice)
@@ -487,7 +573,7 @@ async def test_confirm_is_guarded_against_double_submit(
     data["submitting"] = True
     await storage.set_data(key, data)
 
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
     assert await _expense_count(session) == 0  # guarded — no duplicate write
 
 
@@ -524,9 +610,7 @@ async def test_event_scope_tags_expense_to_event(
 
     bot = MockedBot()
     await _start_to_roster(dispatcher, bot, session, amount="20")
-    await feed_callback(dispatcher, bot, make_tap("ax:pdone"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:m:equal"), session=session)
-    await feed_callback(dispatcher, bot, make_tap("ax:ok"), session=session)
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
 
     assert 'Added to "Trip"' in (bot.last_edit or "")
     row = (await session.execute(select(Expense))).scalar_one()
