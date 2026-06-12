@@ -25,7 +25,8 @@ def _draft(**overrides: object) -> WizardDraft:
         "split_mode": "equal",
         "amount_cents": 5025,
         "currency": "SGD",
-        "currency_default": "SGD",
+        "currency_general": "SGD",
+        "currency_event": None,
         "description": "dinner",
         "roster": [_rm("alice"), _rm("bob")],
         "selected": [0, 1],
@@ -60,6 +61,35 @@ def test_overridden_currency_is_prefixed() -> None:
         _one_liner_tip(_draft(currency="EUR", description=None))
         == "/addexpense EUR50.25"
     )
+
+
+def test_currency_compares_against_effective_scope_default() -> None:
+    # Event scope: a bare amount parsed as the event's JPY needs no prefix —
+    # the one-liner under the same active event resolves bare → JPY too.
+    tip = _one_liner_tip(
+        _draft(
+            currency="JPY",
+            currency_event="JPY",
+            active_event_id="e1",
+            description=None,
+        )
+    )
+    assert tip == "/addexpense 50.25"
+
+
+def test_general_override_prefixes_event_currency() -> None:
+    # Pinned event-currency + forced general: the one-liner's #general scope
+    # resolves bare → SGD, so JPY must be spelled out to round-trip.
+    tip = _one_liner_tip(
+        _draft(
+            currency="JPY",
+            currency_event="JPY",
+            active_event_id="e1",
+            force_general=True,
+            description=None,
+        )
+    )
+    assert tip == "/addexpense JPY50.25 #general"
 
 
 def test_general_override_appends_flag() -> None:

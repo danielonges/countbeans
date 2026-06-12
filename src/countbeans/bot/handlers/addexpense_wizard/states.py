@@ -56,7 +56,11 @@ class WizardDraft(TypedDict):
     payer_id: str
     payer_username: str | None
     payer_first_name: str | None
-    currency_default: str
+    # Both scope defaults are kept so the effective one can be re-derived when
+    # the #general toggle flips the scope mid-draft (see _default_currency).
+    currency_general: str  # the group default (general-scope fallback)
+    currency_event: str | None  # the event scope's default; None = no event
+    currency_explicit: bool  # the typed amount pinned a currency (EUR50/€50)
     active_event_id: str | None
     active_event_name: str | None
     force_general: bool  # the #general toggle (one-off scope override)
@@ -114,6 +118,18 @@ def _use_event_scope(data: WizardDraft) -> bool:
     """Whether this draft writes to the active event: there is one, and #general
     hasn't overridden it for this expense. The single source of the scope rule."""
     return bool(data.get("active_event_id")) and not data.get("force_general")
+
+
+def _default_currency(data: WizardDraft) -> str:
+    """The currency a bare amount means under the draft's *effective* scope —
+    the event's when writing to the event, the group's otherwise. The single
+    place the wizard resolves a default currency (parallels ChatContext.currency
+    on the inline path, which resolves scope before parsing)."""
+    if _use_event_scope(data):
+        event_currency = data["currency_event"]
+        assert event_currency is not None  # stored whenever an event is active
+        return event_currency
+    return data["currency_general"]
 
 
 def _scope_label(data: WizardDraft) -> str:

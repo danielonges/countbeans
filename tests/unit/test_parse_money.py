@@ -4,10 +4,29 @@ import pytest
 
 from countbeans.bot.utils.parsing import (
     MAX_AMOUNT_CENTS,
+    explicit_currency,
     looks_like_money,
     parse_amount_cents,
     parse_money,
 )
+
+
+# explicit_currency — does the token pin a currency, or follow the scope?
+# (Drives the wizard's #general toggle: pinned currencies survive a scope
+# flip; bare/$ amounts are re-derived as "the scope's money".)
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("USD50", "USD"),
+        ("usd50", "USD"),
+        ("€50", "EUR"),
+        ("50", None),  # bare → scope default
+        ("$50", None),  # $ is "my scope's money", never a pin
+        ("dinner", None),  # not money at all
+    ],
+)
+def test_explicit_currency(token: str, expected: str | None) -> None:
+    assert explicit_currency(token) == expected
 
 
 # looks_like_money — the diagnostic predicate behind the "amount in the wrong

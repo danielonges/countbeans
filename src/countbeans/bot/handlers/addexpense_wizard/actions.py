@@ -40,6 +40,7 @@ from .render import (
 from .states import (
     AddExpenseFlow,
     WizardDraft,
+    _default_currency,
     _dict_to_member,
     _effective_event_id,
     _reload_roster,
@@ -189,6 +190,11 @@ async def _toggle_general(
         return
     force = not data.get("force_general")
     await state.update_data(force_general=force)
+    # A bare (or $-prefixed) amount means "the scope's money", and the scope
+    # just changed — re-derive it, exactly as the inline path does by resolving
+    # scope before parsing. A pinned currency (EUR50/€50) stays the user's.
+    if not data.get("currency_explicit"):
+        await state.update_data(currency=_default_currency(await get_draft(state)))
     await _reload_roster(state, uow)
     await state.set_state(AddExpenseFlow.participants)
     await _repaint(bot, chat_id, state)

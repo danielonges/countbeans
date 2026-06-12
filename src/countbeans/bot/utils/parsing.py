@@ -317,6 +317,24 @@ def parse_money(token: str, default_currency: str) -> tuple[str, int]:
     return currency, cents
 
 
+def explicit_currency(token: str) -> str | None:
+    """The currency a money token pins independently of any default — a fused
+    ISO code (``USD50``) or an unambiguous symbol (``€50``). ``None`` for a
+    bare amount or ``$``: both mean "the scope's own currency" (see
+    ``_SYMBOL_TO_CODE`` for why ``$`` floats), so they should follow the scope
+    if it later changes — the wizard's #general toggle re-derives them."""
+    match = _MONEY_RE.match(token)
+    if match is None:
+        return None
+    code = match.group("code")
+    if code is not None:
+        return code.upper()
+    sym = match.group("sym")
+    if sym is not None and sym != "$":
+        return _SYMBOL_TO_CODE[sym]
+    return None
+
+
 def looks_like_money(token: str) -> bool:
     """Whether ``token`` would parse as an amount (with or without a currency
     marker). A diagnostic predicate for "an amount, but in the wrong place"

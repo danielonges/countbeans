@@ -24,7 +24,14 @@ from aiogram.types import (
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import GENERAL_KEYWORD
 
-from .states import AddExpenseFlow, WizardDraft, _is_reconciled, _scope_label, get_draft
+from .states import (
+    AddExpenseFlow,
+    WizardDraft,
+    _default_currency,
+    _is_reconciled,
+    _scope_label,
+    get_draft,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +264,9 @@ def _one_liner_tip(data: WizardDraft) -> str | None:
     if description and _TIP_UNSAFE.search(description):
         return None
     amount = _fmt_plain_amount(data["amount_cents"])
-    if data["currency"] != data["currency_default"]:
+    # Prefix the currency only when a bare amount wouldn't reproduce it — i.e.
+    # it differs from what the one-liner's scope-aware default would resolve.
+    if data["currency"] != _default_currency(data):
         amount = f"{data['currency']}{amount}"
     parts = ["/addexpense", amount]
     if description:

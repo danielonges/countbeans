@@ -601,6 +601,55 @@ async def test_event_scope_defaults_and_general_toggle(
     assert "2 selected" in (bot.last_edit or "")
 
 
+async def test_general_toggle_rederives_default_currency(
+    dispatcher, session: AsyncSession
+) -> None:
+    # A bare amount means "the scope's money". Under a JPY event, "500" is
+    # JPY 500 — flipping to #general must re-label it as the group's SGD (and
+    # back), exactly as the inline path resolves scope before parsing.
+    group = await seed_group(session)
+    alice = await seed_member(session, group, telegram_user_id=1001, username="alice")
+    await seed_event(session, group, creator=alice, name="Trip", default_currency="JPY")
+
+    bot = MockedBot()
+    await _start_to_roster(dispatcher, bot, session, amount="500")
+    assert "JPY 500.00" in (bot.last_reply or "")
+
+    await feed_callback(dispatcher, bot, make_tap("ax:gen"), session=session)
+    assert "SGD 500.00" in (bot.last_edit or "")  # general scope → group default
+
+    await feed_callback(dispatcher, bot, make_tap("ax:gen"), session=session)
+    assert "JPY 500.00" in (bot.last_edit or "")  # back to the event's currency
+
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
+    row = (await session.execute(select(Expense))).scalar_one()
+    assert row.currency == "JPY"
+
+
+async def test_pinned_currency_survives_general_toggle(
+    dispatcher, session: AsyncSession
+) -> None:
+    # An explicitly typed currency (EUR50) is the user's choice — the scope
+    # flip must not relabel it.
+    group = await seed_group(session)
+    alice = await seed_member(session, group, telegram_user_id=1001, username="alice")
+    await seed_event(session, group, creator=alice, name="Trip", default_currency="JPY")
+
+    bot = MockedBot()
+    await _start_to_roster(dispatcher, bot, session, amount="EUR50")
+    assert "EUR 50.00" in (bot.last_reply or "")
+
+    await feed_callback(dispatcher, bot, make_tap("ax:gen"), session=session)
+    assert "EUR 50.00" in (bot.last_edit or "")
+
+    await feed_callback(dispatcher, bot, make_tap("ax:eq"), session=session)
+    row = (await session.execute(select(Expense))).scalar_one()
+    assert row.currency == "EUR"
+    assert row.event_id is None  # forced general
+    # The tip must spell the pinned currency out to round-trip under #general.
+    assert "Faster next time: /addexpense EUR50 #general" in (bot.last_edit or "")
+
+
 async def test_event_scope_tags_expense_to_event(
     dispatcher, session: AsyncSession
 ) -> None:

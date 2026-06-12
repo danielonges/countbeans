@@ -15,6 +15,7 @@ from aiogram.types import ForceReply, Message
 
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.parsing import (
+    explicit_currency,
     extract_quoted_description,
     looks_like_money,
     parse_money,
@@ -31,6 +32,7 @@ from .render import (
 from .states import (
     AddExpenseFlow,
     WizardDraft,
+    _default_currency,
     _parse_share,
     _reload_roster,
     get_draft,
@@ -61,7 +63,10 @@ async def start_wizard(message: Message, state: FSMContext, uow: UnitOfWork) -> 
             "payer_id": str(payer.id),
             "payer_username": payer.username,
             "payer_first_name": payer.first_name,
-            "currency_default": ctx.currency,
+            # Both scope defaults, so the #general toggle can re-derive the
+            # effective one mid-draft (ctx.currency is event-aware here).
+            "currency_general": ctx.group.default_currency,
+            "currency_event": ctx.currency if active else None,
             "active_event_id": str(active.id) if active else None,
             "active_event_name": active.name if active else None,
             "force_general": False,
@@ -109,19 +114,24 @@ async def on_amount(
         await _amount_reprompt(message, state, "Send an amount like 25.50.")
         return
     try:
-        currency, amount_cents = parse_money(tokens[0], data["currency_default"])
+        currency, amount_cents = parse_money(tokens[0], _default_currency(data))
     except ValueError:
         await _amount_reprompt(
             message, state, "Invalid amount. Send a positive number like 25.50."
         )
         return
+    # Whether the token pinned its own currency (EUR50/€50) or follows the
+    # scope (bare/$ — re-derived if the #general toggle later flips the scope).
+    pinned = explicit_currency(tokens[0]) is not None
     rest = text[len(tokens[0]) :].strip()
     if "roster" in data:
         # ✏️ Amount re-entry from the roster (the roster only exists once the
         # participants step has opened): update the money — and the description
         # only when new text follows the amount — keep the selection, and return
         # to the roster with the 📝 description step's chrome.
-        await state.update_data(amount_cents=amount_cents, currency=currency)
+        await state.update_data(
+            amount_cents=amount_cents, currency=currency, currency_explicit=pinned
+        )
         if rest:
             await state.update_data(description=_description_from_rest(rest))
         await state.set_state(AddExpenseFlow.participants)
@@ -133,7 +143,10 @@ async def on_amount(
     # Domino's`. The description can be edited later via the 📝 button.
     description = _description_from_rest(rest)
     await state.update_data(
-        amount_cents=amount_cents, currency=currency, description=description
+        amount_cents=amount_cents,
+        currency=currency,
+        currency_explicit=pinned,
+        description=description,
     )
     # The opening prompt is kept, so the reply to it is kept too (symmetry); just
     # post the anchor below. Later steps (description/share) do drop the reply.
