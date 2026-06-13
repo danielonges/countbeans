@@ -309,9 +309,9 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
   **Still open:** acting on an entry directly from the statement page itself.
 - ✅ **(H9, sev 2)** Silent argument swallowing, as with `/balance` (theme T4).
   **Fixed:** same `parse_view_selector` note here.
-- ☐ **(H1, sev 1)** Timestamps carry no timezone hint. For a travel-oriented
-  product, "Jun 03 12:30" in an unstated zone occasionally misleads ("that
-  dinner was at 8pm"). A one-time footnote or localized times would close it.
+- ✅ **(H1, sev 1)** Timestamps carried no timezone hint. **Fixed:** a "🕓 Times
+  are UTC." footnote on every non-empty statement. (Localized times need the
+  user's zone, which the bot doesn't have — deferred.)
 
 **Recommendations (feature level):**
 
@@ -499,10 +499,10 @@ confusion arises.
   amounts — their ledger entries survive and still count.
 - ☐ **(H6, sev 2)** Editing a roster by typing one handle per message is the
   exact task the `/addexpense` wizard already solved with a paged toggle roster.
-- ☐ **(H10, sev 1)** After `/event close`, a user who wants the event back
-  discovers reopening isn't supported only by trying syntax that fails into the
-  generic usage block. Until reopen exists (deferred), the close confirmation
-  could set the expectation ("closed events stay closed").
+- ✅ **(H10, sev 1)** After `/event close`, a user who wanted the event back
+  discovered reopening isn't supported only by trying syntax that failed into
+  the generic usage block. **Fixed:** the close confirmation now says "Closed
+  events stay closed — start a fresh one with /event new …".
 
 **Recommendations (feature level):**
 
@@ -539,9 +539,9 @@ command, and per-currency activity totals.
   expenses will land (theme T3).
   **Fixed:** the snapshot now carries an "Active event: …" line (or "none — new
   expenses are general").
-- ☐ **(H6, sev 1)** The reply is a good dashboard with no exits — it names no
-  related commands (`/balance all`, `/event info`) even where its own content
-  begs the follow-up (activity totals → balances).
+- ✅ **(H6, sev 1)** The reply was a good dashboard with no exits — it named no
+  related commands. **Fixed:** it now closes with "See more: /balance all ·
+  /statements all · /event info".
 
 **Recommendations:** ✅ add an "Active event" line (or "none — new expenses are
 general") to the snapshot *(done)*; ☐ optionally close with one line of
@@ -601,10 +601,10 @@ already been mentioned in expenses here — I've linked those to you").
   button alternative: a "✋ Count me in" button on the welcome message (tappable
   by anyone, onboarding the tapper) would make joining literally one tap and
   double as social proof in the chat.
-- ☐ **(H1, sev 1)** Silent auto-onboarding via the membership stream means
-  `/join` often answers "you're already part of this group's ledger" to someone
-  who never joined — harmless, but the wording could acknowledge it ("you were
-  added automatically when you joined the chat").
+- ✅ **(H1, sev 1)** Silent auto-onboarding via the membership stream meant
+  `/join` often answered "you're already part of this group's ledger" to someone
+  who never joined. **Fixed:** the reply now reads "… (I add everyone
+  automatically when they join the chat) …".
 - ☐ **(H4, sev 1)** Menu descriptions are good and admin-gating is flagged inline
   ("(admin)") — keep this convention for any new command.
 

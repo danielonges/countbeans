@@ -105,6 +105,10 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         lines.append("")
         lines.append("No expenses recorded yet.")
 
+    # A dashboard with exits — the snapshot's content begs these follow-ups.
+    lines.append("")
+    lines.append("See more: /balance all · /statements all · /event info")
+
     # Plain text on purpose: @usernames, group names, and first names are
     # free text that would mangle (or 400) under Markdown parsing — same reason
     # /statements stays plain.

@@ -280,7 +280,9 @@ async def test_event_pause_resume_close_flow(dispatcher, session: AsyncSession) 
     await feed(
         dispatcher, bot, make_message("/event close", from_id=1001), session=session
     )
-    assert "Closed" in (bot.last_reply or "")
+    reply = bot.last_reply or ""
+    assert "Closed" in reply
+    assert "stay closed" in reply  # sets the no-reopen expectation
     assert (await read_group(session)).active_event_id is None
     closed = await EventRepository(session).get(ev.event_id)
     assert closed is not None and closed.status == "closed"

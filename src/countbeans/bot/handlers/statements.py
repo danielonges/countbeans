@@ -61,7 +61,10 @@ def _render(page: StatementPage, title: str) -> str:
         return f"{title}\n\nNo transactions yet."
     pages = math.ceil(page.total / page.page_size)
     header = f"{title}  (page {page.page + 1}/{pages}, {page.total} total)"
-    return header + "\n\n" + "\n".join(_entry_lines(e) for e in page.entries)
+    body = "\n".join(_entry_lines(e) for e in page.entries)
+    # Timestamps are server UTC — note it once so a traveller doesn't misread
+    # "Jun 03 12:30" as local time.
+    return f"{header}\n\n{body}\n\n🕓 Times are UTC."
 
 
 def _keyboard(page: StatementPage, cb_prefix: str) -> InlineKeyboardMarkup | None:

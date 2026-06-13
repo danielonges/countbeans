@@ -73,6 +73,20 @@ async def test_join_onboards_any_member(dispatcher, session: AsyncSession) -> No
     assert await _is_member(session, 4004)
 
 
+async def test_join_again_acknowledges_auto_add(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A second /join (or one from an auto-onboarded member) explains why they're
+    already in, rather than a bare 'nothing to do'."""
+    bot = MockedBot(caller_is_admin=False)
+    await feed(dispatcher, bot, make_message("/join", from_id=4004), session=session)
+    await feed(dispatcher, bot, make_message("/join", from_id=4004), session=session)
+
+    reply = (bot.last_reply or "").lower()
+    assert "already in this group's ledger" in reply
+    assert "automatically" in reply
+
+
 async def test_join_claims_pending_placeholder(
     dispatcher, session: AsyncSession
 ) -> None:

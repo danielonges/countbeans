@@ -232,7 +232,8 @@ async def _close(message: Message, uow: UnitOfWork, group: Group) -> None:
         uow, group.id, SetEventStatusCommand(event_id=open_event.id, status="closed")
     )
     await message.reply(
-        f'✅ Closed "{open_event.name}". Start a new event with /event new "<name>".'
+        f'✅ Closed "{open_event.name}". Closed events stay closed — start a fresh '
+        'one with /event new "<name>".'
     )
     logger.info("Event closed: event_id=%s group_id=%s", open_event.id, group.id)
 
@@ -606,8 +607,8 @@ async def on_event_action(callback: CallbackQuery, uow: UnitOfWork, bot: Bot) ->
             SetEventStatusCommand(event_id=open_event.id, status="closed"),
         )
         note = (
-            f'✅ Closed "{open_event.name}". Start a new event with '
-            '/event new "<name>".'
+            f'✅ Closed "{open_event.name}". Closed events stay closed — start a '
+            'fresh one with /event new "<name>".'
         )
         await callback.answer("Closed")
 

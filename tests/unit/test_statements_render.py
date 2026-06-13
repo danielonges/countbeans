@@ -91,6 +91,12 @@ def test_missing_username_falls_back_to_someone():
 def test_render_empty_page():
     text = _render(_page([], total=0), "📋 Group statement")
     assert "No transactions yet." in text
+    assert "UTC" not in text  # nothing to timestamp
+
+
+def test_render_notes_utc_when_there_are_entries():
+    text = _render(_page([_expense()]), "📋 Group statement")
+    assert "🕓 Times are UTC." in text
 
 
 def test_render_header_has_page_and_total():

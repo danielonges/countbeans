@@ -40,7 +40,10 @@ def _compose_join_reply(result: OnboardResult) -> str:
         )
     if result.newly_added:
         return "✅ You're in! I'll track shared expenses for you in this group."
-    return "👍 You're already part of this group's ledger — nothing to do."
+    return (
+        "👍 You're already in this group's ledger (I add everyone automatically "
+        "when they join the chat) — nothing to do."
+    )
 
 
 @router.message(Command("join"), F.chat.type.in_({"group", "supergroup"}))

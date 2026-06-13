@@ -23,6 +23,8 @@ async def test_group_snapshot_basics(dispatcher, session: AsyncSession) -> None:
     assert "@caller" in reply  # the caller is onboarded and listed
     # With no event open, /group says where new expenses land.
     assert "Active event: none" in reply
+    # The dashboard offers exits to its natural follow-ups.
+    assert "/balance all" in reply and "/event info" in reply
 
 
 async def test_group_shows_active_event(dispatcher, session: AsyncSession) -> None:
