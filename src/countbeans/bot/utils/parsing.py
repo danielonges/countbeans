@@ -33,6 +33,29 @@ def is_all_selector(args: Sequence[str]) -> bool:
     return bool(args) and is_all(args[0])
 
 
+# The bare positional selector ``me`` — the explicit "just mine" twin of ``all``.
+# Both /balance and /statements accept it (and bare = personal too), so the two
+# read commands take the *same* selector vocabulary.
+_ME_SELECTOR = "me"
+
+
+def parse_view_selector(args: Sequence[str]) -> tuple[bool, str | None]:
+    """Classify a read command's view selector into ``(group_wide, unrecognized)``.
+
+    ``group_wide`` is True only for ``all``; bare and ``me`` are the personal
+    view (False). ``unrecognized`` is the first arg when it is *neither* a known
+    selector nor absent — the command still answers with the personal view, but
+    the handler can prepend a one-line "I didn't recognize 'x'" note rather than
+    silently swallowing the typo (CLAUDE-grade forgiving-but-not-silent)."""
+    if not args:
+        return False, None
+    if is_all_selector(args):
+        return True, None
+    if args[0].casefold() == _ME_SELECTOR:
+        return False, None
+    return False, args[0]
+
+
 # The reserved write-scope override keyword, in its own ``#``-prefixed namespace
 # (distinct from the ``@mention`` target family and the bare view-selector family
 # above — see CLAUDE.md "The #general write-scope override"). On /addexpense and

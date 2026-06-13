@@ -43,6 +43,41 @@ async def test_statements_group_view(dispatcher, session: AsyncSession) -> None:
     assert "Group statement" in (bot.last_reply or "")
 
 
+async def test_statements_unrecognized_arg_notes_and_shows_personal(
+    dispatcher, session: AsyncSession
+) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements mine", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert 'didn\'t recognize "mine"' in reply
+    assert "/statements all" in reply
+    assert "Your statement" in reply  # personal view still rendered
+
+
+async def test_statements_me_is_personal_without_note(
+    dispatcher, session: AsyncSession
+) -> None:
+    await seed_group(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements me", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "Your statement" in reply
+    assert "didn't recognize" not in reply
+
+
 async def test_statements_group_page_callback_repaints(
     dispatcher, session: AsyncSession
 ) -> None:

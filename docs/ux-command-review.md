@@ -49,7 +49,7 @@ commits); the date is omitted on individual items to keep them readable.
 | 4 | Only the most recent expense was correctable | 3 | ✅ |
 | 5 | Mode (active-event) visibility inconsistent on reads | 2–3 | ◑ |
 | 6 | `/event` recall-heavy, zero buttons | 3 | ◑ |
-| 7 | Read commands silently swallow bad arguments | 2 | ☐ |
+| 7 | Read commands silently swallow bad arguments | 2 | ✅ |
 
 The four headline findings (1–4) and the `/event` buttonization (6) shipped;
 what remains is scope-labeling on reads (5), unrecognized-arg notes (7), the
@@ -118,9 +118,13 @@ onboarding/wording polish. Details per command below.
    unremovable-member edge is gone).
    **Still open:** the toggle-roster editor.
 
-7. ☐ **Read commands silently swallow bad arguments.** `/balance al` (typo)
-   shows your *personal* balance with no hint that the argument was ignored —
+7. ✅ **Read commands silently swallow bad arguments.** `/balance al` (typo)
+   showed your *personal* balance with no hint that the argument was ignored —
    the user may believe they're looking at the group view. (H9, sev 2.)
+   **Fixed:** a shared `parse_view_selector` drives both reads; an unrecognized
+   arg still answers (personal view) but prepends "ℹ️ I didn't recognize 'x' —
+   … use /… all for everyone's". `/balance` now also accepts `me`, matching
+   `/statements`.
 
 The overarching theme: **the bot already has a strong interaction pattern —
 state-aware inline buttons with per-user ownership gates** (the wizard roster,
@@ -190,13 +194,17 @@ cross-scope reads* — e.g. reading general while an event is active — are a
 separate, deliberately deferred feature; this finding is only about labeling
 what is already shown.)
 
-### T4 — Forgiving parsing has tipped into silent misdirection ☐ (H9 · sev 2)
+### T4 — Forgiving parsing has tipped into silent misdirection ✅ (H9 · sev 2)
 
-`/balance` and `/statements` ignore unrecognized arguments and fall back to the
+`/balance` and `/statements` ignored unrecognized arguments and fell back to the
 personal view. Forgiveness is right; *silence* is not. A typo'd selector should
 still answer, but with a one-line note: "I didn't recognize 'al' — showing your
 own balance. For everyone's, use /balance all." Cost: one line. Benefit: the
 user never mistakes the personal view for the group view.
+
+**Fixed:** both reads now route through `parse_view_selector`, which returns the
+unrecognized token; the handler prepends exactly that note. `/balance` also
+gained the `me` selector for parity with `/statements`.
 
 ### T5 — Admin refusals are a strength — keep the formula (positive · H9)
 
@@ -249,10 +257,12 @@ direction in plain words ("you owe" / "you're owed").
 - ☐ **(H2, sev 1)** "To settle up (simplified)" / "(raw)" is system vocabulary.
   "Raw" means nothing to a non-technical user; the distinction that matters to
   them is "fewest payments" vs. "exact pairwise debts."
-- ☐ **(H9, sev 2)** Unrecognized arguments are silently ignored (theme T4).
-- ☐ **(H4, sev 1)** `/statements` accepts `me` as a selector; `/balance`
-  accepts only bare-or-`all`. The two selector families should be identical —
-  anyone who learns `me` on one will try it on the other.
+- ✅ **(H9, sev 2)** Unrecognized arguments were silently ignored (theme T4).
+  **Fixed:** a typo now answers with the personal view plus an "I didn't
+  recognize …" note.
+- ✅ **(H4, sev 1)** `/statements` accepted `me`; `/balance` accepted only
+  bare-or-`all`. **Fixed:** both now share `parse_view_selector`, so `/balance
+  me` works too.
 
 **Recommendations (feature level):**
 
@@ -265,7 +275,7 @@ direction in plain words ("you owe" / "you're owed").
   from two commands plus transcription into one tap.
 - ☐ Replace "simplified"/"raw" with plain words; keep the toggle's behavior
   untouched.
-- ☐ Accept `me` for symmetry, and add the gentle unrecognized-argument note.
+- ✅ Accept `me` for symmetry, and add the gentle unrecognized-argument note.
 
 **Wizard verdict:** **no wizard.** It's a read; a wizard would add steps. Buttons
 on the reply are the right tool.
@@ -295,7 +305,8 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
   **Mitigated:** `/void` now steps back through the last 10 entries (both
   kinds), so anything recently visible in a statement is reachable without IDs.
   **Still open:** acting on an entry directly from the statement page itself.
-- ☐ **(H9, sev 2)** Silent argument swallowing, as with `/balance` (theme T4).
+- ✅ **(H9, sev 2)** Silent argument swallowing, as with `/balance` (theme T4).
+  **Fixed:** same `parse_view_selector` note here.
 - ☐ **(H1, sev 1)** Timestamps carry no timezone hint. For a travel-oriented
   product, "Jun 03 12:30" in an unstated zone occasionally misleads ("that
   dinner was at 8pm"). A one-time footnote or localized times would close it.
@@ -309,7 +320,7 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
   view, a member should be able to initiate voiding one of *their* visible
   entries (selection by tapping, never by typing an ID). Same ownership and
   admin rules as `/void` today.
-- ☐ Add the unrecognized-argument note (shared with `/balance`).
+- ✅ Add the unrecognized-argument note (shared with `/balance`).
 
 **Wizard verdict:** **no wizard.** Extend the existing button surface (scope
 label + entry-level actions), don't add steps.

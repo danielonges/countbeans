@@ -18,7 +18,7 @@ from aiogram.types import InlineKeyboardMarkup, Message
 
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
-from countbeans.bot.utils.parsing import is_all_selector
+from countbeans.bot.utils.parsing import parse_view_selector
 from countbeans.bot.utils.settle_buttons import payment_buttons
 from countbeans.db.models import Event, Group
 from countbeans.services.balance import get_group_summary
@@ -157,7 +157,7 @@ async def cmd_balance(
     group, caller = ctx.group, ctx.caller
 
     args = (command.args or "").split()
-    show_all = is_all_selector(args)
+    show_all, unrecognized = parse_view_selector(args)
 
     # /balance defaults to the active event's scope (general when none is active).
     # Named cross-scope reads (/balance general, /balance "<event>") are deferred.
@@ -166,5 +166,12 @@ async def cmd_balance(
     else:
         text, keyboard = await render_personal_balance(
             uow, group, caller.id, ctx.active_event
+        )
+    # Forgiving but not silent: an unrecognized arg still shows the personal view,
+    # with a note so the caller doesn't mistake it for the group view (theme T4).
+    if unrecognized is not None:
+        text = (
+            f'ℹ️ I didn\'t recognize "{unrecognized}" — showing your own balance. '
+            "Use /balance all for everyone's.\n\n" + text
         )
     await message.reply(text, reply_markup=keyboard)

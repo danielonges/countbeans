@@ -148,3 +148,41 @@ async def test_creditor_personal_balance_has_no_pay_button(
 
     assert "you're owed" in (bot.last_reply or "")
     assert bot.sent[-1].reply_markup is None
+
+
+async def test_balance_me_is_personal_without_note(
+    dispatcher, session: AsyncSession
+) -> None:
+    """`/balance me` mirrors `/statements me` — personal view, no typo note."""
+    await _seed_caller_owes_bob(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/balance me", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "you owe" in reply.lower()
+    assert "didn't recognize" not in reply
+
+
+async def test_balance_unrecognized_arg_notes_and_shows_personal(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A typo'd selector still answers (personal view) but says so, so the caller
+    can't mistake it for the group view."""
+    await _seed_caller_owes_bob(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/balance al", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert 'didn\'t recognize "al"' in reply
+    assert "/balance all" in reply
+    assert "you owe" in reply.lower()  # personal view still rendered

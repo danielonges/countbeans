@@ -26,7 +26,7 @@ from aiogram.types import (
 
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
-from countbeans.bot.utils.parsing import is_all_selector
+from countbeans.bot.utils.parsing import parse_view_selector
 from countbeans.dto.domain import StatementEntry, StatementPage
 from countbeans.services.statements import get_statement_page
 from countbeans.services.uow import UnitOfWork
@@ -92,7 +92,7 @@ async def cmd_statements(
         return
 
     args = (command.args or "").split()
-    group_wide = is_all_selector(args)
+    group_wide, unrecognized = parse_view_selector(args)
 
     ctx = await resolve_chat_context(uow, message)
     group, caller = ctx.group, ctx.caller
@@ -104,7 +104,15 @@ async def cmd_statements(
         page = await get_statement_page(uow, group.id, user_id=caller.id, page=0)
         title, cb_prefix = "📋 Your statement", f"stmt:u:{message.from_user.id}"
 
-    await message.reply(_render(page, title), reply_markup=_keyboard(page, cb_prefix))
+    text = _render(page, title)
+    # Forgiving but not silent (theme T4): an unrecognized arg still shows the
+    # personal statement, with a note rather than a silent swallow.
+    if unrecognized is not None:
+        text = (
+            f'ℹ️ I didn\'t recognize "{unrecognized}" — showing your own '
+            "statement. Use /statements all for the whole group.\n\n" + text
+        )
+    await message.reply(text, reply_markup=_keyboard(page, cb_prefix))
     logger.debug(
         "statements: scope=%s group=%s page=0 total=%d",
         "all" if group_wide else "me",
