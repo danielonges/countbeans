@@ -29,11 +29,21 @@ import logging
 import re
 import uuid
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from pydantic import ValidationError
 
+from countbeans.bot.handlers.balance import (
+    render_group_balances,
+    render_personal_balance,
+)
 from countbeans.bot.utils.context import ChatContext, resolve_chat_context
 from countbeans.bot.utils.formatting import (
     display_name,
@@ -46,9 +56,15 @@ from countbeans.bot.utils.parsing import (
     parse_amount_cents,
 )
 from countbeans.bot.utils.permissions import is_admin
-from countbeans.db.models import User
+from countbeans.bot.utils.settle_buttons import (
+    decode_id,
+    encode_id,
+    payment_buttons,
+)
+from countbeans.db.models import Event, Group, User
 from countbeans.dto.commands import SettleUpCommand
 from countbeans.dto.results import SettlementCreatedResult
+from countbeans.services.balance import suggested_transfers
 from countbeans.services.errors import DomainError
 from countbeans.services.settlement import owed_by_currency, settle_all, settle_up
 from countbeans.services.uow import UnitOfWork
@@ -65,7 +81,8 @@ _ARGS_RE = re.compile(r"^@([\w.]+)(?:\s+(\d+(?:\.\d{1,2})?))?$")
 _PAIR_ARGS_RE = re.compile(r"^@([\w.]+)\s+@([\w.]+)(?:\s+(\d+(?:\.\d{1,2})?))?$")
 
 _USAGE = (
-    "Usage: /settleup @username [amount]   (you pay someone)\n"
+    "Usage: /settleup                      (see what you owe — tap to settle)\n"
+    "       /settleup @username [amount]   (you pay someone)\n"
     "       /settleup @from @to [amount]   (admins — record a pair's payment)\n"
     "       /settleup @all                 (admins — settle the whole group)\n"
     "Example: /settleup @alice 25.50\n"
@@ -103,6 +120,20 @@ async def cmd_settleup(
     # overrode it for this command (writes are otherwise strictly active-scoped).
     # event_id, scope_note, and the currency fallback all key off ctx.scoped_event.
     ctx = (await resolve_chat_context(uow, message)).scoped(force_general=force_general)
+
+    # Bare /settleup — the picker: the caller's suggested payments as buttons,
+    # one tap each. The typed forms below stay as the accelerator (and the only
+    # way to settle a partial amount).
+    if not args:
+        text, keyboard = await _picker_view(
+            uow,
+            ctx.group,
+            ctx.caller.id,
+            event=ctx.scoped_event,
+            force_general=ctx.force_general,
+        )
+        await message.reply(text, reply_markup=keyboard)
+        return
 
     # Two handles → admin records a settlement for a pair (e.g. a departed
     # member). Tried before the single-handle form, which it would also match.
@@ -412,3 +443,222 @@ async def _settle_whole_group(
         ctx.group.id,
         len(results),
     )
+
+
+async def _picker_view(
+    uow: UnitOfWork,
+    group: Group,
+    viewer_id: uuid.UUID,
+    *,
+    event: Event | None,
+    force_general: bool,
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """The bare-/settleup picker: the viewer's suggested payments as tap-to-pay
+    buttons (origin 'k'). Also repainted after a tap so settled rows vanish."""
+    event_id = event.id if event else None
+    scope_note = f' in "{event.name}"' if event else ""
+    balances = await uow.balances.compute_for_group(group.id, event_id=event_id)
+    mine = [
+        t
+        for t in suggested_transfers(balances, simplify_debts=group.simplify_debts)
+        if t.from_user_id == viewer_id
+    ]
+    if not mine:
+        return (
+            f"✅ You're all settled up{scope_note} — you don't owe anyone right now.\n"
+            "See everyone's balances with /balance all.",
+            None,
+        )
+    names = await uow.balances.get_display_names({t.to_user_id for t in mine})
+    rows = payment_buttons(
+        mine, names, origin="k", force_general=force_general, viewer_is_payer=True
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="✖ Close", callback_data=f"st:x:{encode_id(viewer_id)}"
+            )
+        ]
+    )
+    text = (
+        f"💸 You have {len(mine)} payment(s) to make{scope_note} — tap one to "
+        "record it as paid in full.\n"
+        "(Partial payment? /settleup @user <amount>.)"
+    )
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("st:"))
+async def on_settle_tap(callback: CallbackQuery, uow: UnitOfWork) -> None:
+    """Tap-to-settle: `st:p:<origin><scope>:<from>:<to>:<cur>` records the full
+    suggested payment between that pair, `st:x:<owner>` closes the picker. Every
+    pay button is bound to its *debtor* — the tapper must be the `from` user —
+    so a button shown in the group can't move anyone else's money. The amount is
+    re-derived at tap time ("settle in full" semantics, like the amount-less
+    typed form), so a stale button can never overpay; if the suggestion is gone
+    the tap alerts and the message repaints instead of writing."""
+    parts = (callback.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+
+    # Narrow to a live Message: an InaccessibleMessage (too old to edit) has no
+    # edit_text, and there's nothing to repaint anyway.
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+
+    chat = callback.message.chat
+    group = await uow.groups.upsert(
+        telegram_chat_id=chat.id, group_name=getattr(chat, "title", None)
+    )
+    tapper = await uow.users.upsert(
+        telegram_user_id=callback.from_user.id,
+        username=callback.from_user.username,
+        first_name=callback.from_user.first_name,
+        last_name=callback.from_user.last_name,
+        claim_in_group=group.id,
+    )
+
+    if action == "x" and len(parts) == 3:
+        try:
+            owner_id = decode_id(parts[2])
+        except ValueError:
+            await callback.answer()
+            return
+        if tapper.id != owner_id:
+            await callback.answer(
+                "Only the person who ran /settleup can close this.", show_alert=True
+            )
+            return
+        await callback.message.edit_text("Settle-up closed. Run /settleup any time.")
+        await callback.answer()
+        return
+
+    if action != "p" or len(parts) != 6 or len(parts[2]) != 2:
+        await callback.answer()
+        return
+    origin, scope_flag = parts[2][0], parts[2][1]
+    force_general = scope_flag == "g"
+    try:
+        from_id = decode_id(parts[3])
+        to_id = decode_id(parts[4])
+    except ValueError:
+        await callback.answer()
+        return
+    currency = parts[5]
+
+    if tapper.id != from_id:
+        await callback.answer(
+            "This button records someone else's payment — only they can tap it. "
+            "Run /settleup to see yours.",
+            show_alert=True,
+        )
+        return
+
+    # Scope at tap time: the group's current active event, unless the button was
+    # minted under a #general override — then it stays general, as promised.
+    active_event = (
+        await uow.events.get(group.active_event_id) if group.active_event_id else None
+    )
+    event = None if force_general else active_event
+    event_id = event.id if event else None
+    scope_note = f' in "{event.name}"' if event else ""
+
+    owed = await owed_by_currency(
+        uow,
+        group.id,
+        from_id,
+        to_id,
+        simplify_debts=group.simplify_debts,
+        event_id=event_id,
+    )
+    if currency not in owed:
+        await callback.answer(
+            "That payment is no longer suggested — balances have changed.",
+            show_alert=True,
+        )
+        await _repaint_origin(
+            callback.message, uow, group, origin, from_id, force_general, active_event
+        )
+        return
+
+    try:
+        cmd = SettleUpCommand(
+            group_id=group.id,
+            from_user_id=from_id,
+            to_user_id=to_id,
+            amount_cents=owed[currency],
+            currency=currency,
+            event_id=event_id,
+            created_by=from_id,
+        )
+        result = await settle_up(uow, cmd, simplify_debts=group.simplify_debts)
+    except ValidationError as exc:
+        await callback.answer(humanize_validation_error(exc)[:200], show_alert=True)
+        return
+    except DomainError as exc:
+        # The suggestion shifted between the owed read and the write — rare.
+        await callback.answer(str(exc)[:200], show_alert=True)
+        return
+
+    names = await uow.balances.get_display_names({from_id, to_id})
+
+    def name(uid: uuid.UUID) -> str:
+        username, first_name = names.get(uid, (None, None))
+        return display_name(username, first_name)
+
+    general_note = (
+        f'\nℹ️ Recorded as general — not in "{active_event.name}".'
+        if force_general and active_event is not None
+        else ""
+    )
+    # The settlement is a ledger event the group should see — a fresh message,
+    # like a typed /settleup's reply; the tapped view repaints separately.
+    await callback.message.answer(
+        f"Settled up{scope_note}: {name(from_id)} paid {name(to_id)} "
+        f"{format_money(result.amount_cents, result.currency)} (full amount owed)"
+        f"{general_note}"
+    )
+    await _repaint_origin(
+        callback.message, uow, group, origin, from_id, force_general, active_event
+    )
+    await callback.answer("Payment recorded ✅")
+    logger.info(
+        "Settlement recorded via tap: settlement_id=%s from=%s to=%s "
+        "amount_cents=%d currency=%s",
+        result.settlement_id,
+        result.from_user_id,
+        result.to_user_id,
+        result.amount_cents,
+        result.currency,
+    )
+
+
+async def _repaint_origin(
+    message: Message,
+    uow: UnitOfWork,
+    group: Group,
+    origin: str,
+    viewer_id: uuid.UUID,
+    force_general: bool,
+    active_event: Event | None,
+) -> None:
+    """Repaint the message the tapped button lives on so its buttons reflect the
+    post-settle state — a stale keyboard would alert on every further tap."""
+    if origin == "a":
+        text, keyboard = await render_group_balances(uow, group, active_event)
+    elif origin == "m":
+        text, keyboard = await render_personal_balance(
+            uow, group, viewer_id, active_event
+        )
+    elif origin == "k":
+        event = None if force_general else active_event
+        text, keyboard = await _picker_view(
+            uow, group, viewer_id, event=event, force_general=force_general
+        )
+    else:
+        return
+    try:
+        await message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest:
+        # "message is not modified" — e.g. a stale tap after an identical repaint.
+        logger.debug("settle repaint skipped (not modified)")

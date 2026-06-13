@@ -12,7 +12,8 @@ COMMAND_REFERENCE = (
     '• /addexpense <amount> "<desc>" [@user …] — record an expense '
     "(/add works too; send it bare for a guided, button-based flow)\n"
     "• /balance [all] — your net position, or every member's with /balance all\n"
-    "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
+    "• /settleup — see what you owe and settle with a tap "
+    "(or /settleup @user [amount])\n"
     "• /void — undo your most recent expense (asks before voiding)\n"
     "• /statements [all] — your transactions, or the whole group's with /statements all\n"
     "• /event … — track a trip or dinner as its own scope (new/pause/resume/close/add/remove)\n"

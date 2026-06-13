@@ -52,11 +52,16 @@ recommends changes at the feature level only — no implementation notes.
    to the caller; the confirm is pinned to the previewed entry's id, so a
    write landing in between can't redirect it, and a double-tap is a no-op.
    The `/help` tip now truthfully promises bare commands never act unasked.*
-2. **Suggested transfers are dead text.** `/balance all` computes exactly who
-   should pay whom and how much — then requires the user to hand-transcribe
-   that into a `/settleup @user amount` command. This is the textbook H6
-   violation (information from one screen must be retyped on another) and the
-   single largest remaining friction in the product's core loop. (Severity 3.)
+2. ✅ **FIXED 2026-06-13** — **Suggested transfers are dead text.** `/balance
+   all` computes exactly who should pay whom and how much — then required the
+   user to hand-transcribe that into a `/settleup @user amount` command. The
+   textbook H6 violation (information from one screen retyped on another) and
+   the single largest remaining friction in the core loop. (Severity 3.)
+   *Fix: bare `/settleup` is now a picker — your suggested payments as
+   tap-to-pay buttons, one tap settles in full; `/balance` and `/balance all`
+   carry the same buttons under their transfer lists. Every button is bound to
+   its debtor, the amount is re-derived at tap time (a stale button alerts
+   instead of overpaying), and the view repaints after the payment lands.*
 3. **Settlements cannot be undone.** `/void` covers expenses only. A
    mis-typed settlement amount or direction is permanent; the only recourse
    is a counter-entry the user must invent themselves. (H3, severity 3.)
@@ -131,6 +136,10 @@ clear alert, and the wizard anchor is owner-bound. The same gate makes
 "Pay @alice SGD 5.00" safe to show in a group: only the named debtor can
 tap it.
 
+> ✅ **PARTIALLY FIXED 2026-06-13** — the settle-up half shipped (tap-to-pay
+> on bare `/settleup`, `/balance`, and `/balance all`, debtor-gated). Still
+> prose-only: `/event info`'s action hints and the welcome's "run /join".
+
 ### T3 — Mode (active event) needs consistent signaling (H1 · severity 2–3)
 
 Active-event mode is a classic mode in the NN/g sense: identical input means
@@ -195,10 +204,10 @@ shows direction in plain words ("you owe" / "you're owed").
 1. **(H6/H7, sev 2)** Pivoting between "my balance" and "everyone's" means
    retyping the command with a remembered selector. The most common
    follow-up to one view is the other.
-2. **(H6/H5, sev 3)** The suggested-transfers block is the product's
-   highest-value computation rendered as inert text (theme T2). The reader's
-   very next action — settling — requires manual transcription back into
-   `/settleup`.
+2. ✅ **FIXED 2026-06-13** — **(H6/H5, sev 3)** The suggested-transfers block
+   was the product's highest-value computation rendered as inert text (theme
+   T2). *Fix: both `/balance` views now carry a debtor-gated tap-to-settle
+   button per transfer, and the view repaints after a payment lands.*
 3. **(H2, sev 1)** "To settle up (simplified)" / "(raw)" is system
    vocabulary. "Raw" means nothing to a non-technical user; the distinction
    that matters to them is "fewest payments" vs. "exact pairwise debts."
@@ -212,11 +221,11 @@ shows direction in plain words ("you owe" / "you're owed").
 - Add a single pivot button to each view ("👥 Everyone's balances" on the
   personal view, "🙋 Just mine" on the group view) that edits the message in
   place — same pattern as statement pagination.
-- Where a suggested transfer involves the viewer, make it actionable: a
-  "Pay @alice SGD 5.00" button, tappable only by the named debtor (owner
-  gate, as in `/statements`), recording the settlement with a confirmation
-  reply. This collapses read-suggestion → settle from two commands plus
-  transcription into one tap.
+- ✅ **FIXED 2026-06-13** — Where a suggested transfer involves the viewer,
+  make it actionable: a "Pay @alice SGD 5.00" button, tappable only by the
+  named debtor (owner gate, as in `/statements`), recording the settlement
+  with a confirmation reply. This collapses read-suggestion → settle from two
+  commands plus transcription into one tap.
 - Replace "simplified"/"raw" with plain words; keep the toggle's behavior
   untouched.
 - Accept `me` for symmetry, and add the gentle unrecognized-argument note.
@@ -287,11 +296,14 @@ member ("@bob — flag it if that's not right") — a nice accountability touch.
 
 **Findings:**
 
-1. **(H6, sev 3)** This is the recall-heaviest *everyday* command now that
-   `/addexpense` has a guided path. The information it demands is exactly
-   what the bot already computed and displayed elsewhere (theme T2). Every
-   transcription step is an invitation to the errors the command then has
-   to catch: wrong direction, wrong currency, overpay.
+1. ✅ **FIXED 2026-06-13** — **(H6, sev 3)** This was the recall-heaviest
+   *everyday* command once `/addexpense` had a guided path. The information it
+   demanded is exactly what the bot already computed elsewhere (theme T2).
+   *Fix: bare `/settleup` shows your suggested payments as tap-to-pay buttons
+   (empty state: "you're all settled up"); direction, counterparty, currency,
+   and amount all come from the suggestion — nothing to transcribe. The
+   `#general` override carries through to the buttons. Typed forms unchanged
+   as the accelerator and the only path to partial amounts.*
 2. **(H2, sev 2)** The direction convention ("`/settleup @alice` means *I pay
    Alice*") is invisible in the command itself and only learnable from the
    usage block. Settling is also the moment of highest anxiety in an
@@ -308,16 +320,17 @@ member ("@bob — flag it if that's not right") — a nice accountability touch.
 
 **Recommendations (feature level):**
 
-- **This is the strongest wizard/picker candidate in the product — but as a
-  one-screen picker, not a multi-step wizard.** Bare `/settleup` should show
-  the caller *their own* suggested payments as buttons ("Pay @alice
-  SGD 25.50", "Pay @dana EUR 10.00") plus a cancel. One tap settles in
-  full — the dominant case. Partial amounts remain the typed accelerator's
-  job (the usage text already teaches it). The empty state ("you owe
-  nobody") replaces today's usage-block response with something far more
-  reassuring.
-- The same buttons surfaced under `/balance all` (debtor-gated) make the
-  read view actionable without even issuing `/settleup`.
+- ✅ **FIXED 2026-06-13** — **This is the strongest wizard/picker candidate in
+  the product — but as a one-screen picker, not a multi-step wizard.** Bare
+  `/settleup` should show the caller *their own* suggested payments as
+  buttons ("Pay @alice SGD 25.50", "Pay @dana EUR 10.00") plus a cancel. One
+  tap settles in full — the dominant case. Partial amounts remain the typed
+  accelerator's job (the usage text already teaches it). The empty state
+  ("you owe nobody") replaces today's usage-block response with something far
+  more reassuring.
+- ✅ **FIXED 2026-06-13** — The same buttons surfaced under `/balance all`
+  (debtor-gated) make the read view actionable without even issuing
+  `/settleup`.
 - Extend undo to settlements (see `/void`).
 - Keep the typed forms exactly as they are for experts and admins —
   consistent with the `/addexpense` philosophy of wizard-plus-accelerator.
@@ -572,7 +585,7 @@ already been mentioned in expenses here — I've linked those to you").
 | Command | Needs a wizard? | What it actually needs |
 |---|---|---|
 | `/addexpense` | Has one (baseline) | — |
-| `/settleup` | **Yes — one-screen suggestion picker** on bare invocation | Tap-to-pay buttons; typed form stays as accelerator |
+| `/settleup` | **Yes — one-screen suggestion picker** ✅ shipped 2026-06-13 | ~~Tap-to-pay buttons~~ ✅; typed form stays as accelerator |
 | `/void` | One-screen **preview + confirm** ✅ shipped 2026-06-13 | ~~Bare must show, not do~~ ✅; reach older entries; cover settlements |
 | `/event` | No | State-aware action buttons on `/event info` / bare `/event`; toggle-roster for add/remove |
 | `/balance` | No | me⇄all pivot button; debtor-gated tap-to-settle on suggestions |
@@ -590,9 +603,12 @@ already been mentioned in expenses here — I've linked those to you").
    together** (T1). Smallest change, removes the only severity-4 interaction
    in the product. *Shipped: preview + caller-bound confirm/keep buttons,
    id-pinned confirm, rewritten help tip and `/void` reference line.*
-2. **Tap-to-settle** (suggestion picker on bare `/settleup`, plus
-   debtor-gated buttons under `/balance all`). Biggest friction reduction in
-   the core loop, and it reuses two patterns the product already trusts.
+2. ✅ **FIXED 2026-06-13** — **Tap-to-settle** (suggestion picker on bare
+   `/settleup`, plus debtor-gated buttons under `/balance` and `/balance
+   all`). Biggest friction reduction in the core loop, and it reuses two
+   patterns the product already trusts. *Shipped: one tap records the
+   payment in full, announces it to the chat, and repaints the view; stale
+   buttons alert instead of writing.*
 3. **Undo coverage: settlements voidable; older entries reachable** from the
    `/void` preview and `/statements`. Closes the H3 gap at the
    highest-anxiety moments.

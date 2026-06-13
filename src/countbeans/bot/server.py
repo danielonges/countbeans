@@ -45,7 +45,9 @@ _COMMANDS = [
     BotCommand(
         command="balance", description="View your balance (or 'all' for everyone)"
     ),
-    BotCommand(command="settleup", description="Record a payment to another member"),
+    BotCommand(
+        command="settleup", description="See what you owe and settle with a tap"
+    ),
     BotCommand(command="void", description="Undo your most recent expense"),
     BotCommand(
         command="simplify", description="View or toggle debt simplification (admin)"
