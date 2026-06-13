@@ -104,6 +104,28 @@ async def list_void_candidates(
     return entries[:limit]
 
 
+async def get_void_preview(
+    uow: UnitOfWork,
+    group_id: uuid.UUID,
+    kind: Literal["expense", "settlement"],
+    entry_id: uuid.UUID,
+) -> VoidPreview | None:
+    """One active entry's preview by id — the entry point used by the
+    /statements void flow (the /void command uses `list_void_candidates`
+    instead). None when the entry is gone, in another group, or already voided.
+    A pure read; the void itself still goes through `void_entry`."""
+    row: Expense | Settlement | None
+    if kind == "expense":
+        row = await uow.expenses.get(entry_id)
+    else:
+        row = await uow.settlements.get(entry_id)
+    if row is None or row.group_id != group_id or row.voided_at is not None:
+        return None
+    return (
+        _expense_preview(row) if isinstance(row, Expense) else _settlement_preview(row)
+    )
+
+
 async def void_entry(
     uow: UnitOfWork,
     group_id: uuid.UUID,

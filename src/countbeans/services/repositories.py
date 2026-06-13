@@ -49,6 +49,7 @@ class RawStatementEntry:
     never has to expose surrogate ids the bot would only discard."""
 
     kind: Literal["expense", "settlement"]
+    entry_id: uuid.UUID  # the row's own id (expenses.id / settlements.id)
     created_at: datetime
     amount_cents: int
     currency: str
@@ -364,6 +365,7 @@ class StatementRepository:
         entries = [
             RawStatementEntry(
                 kind="expense",
+                entry_id=e.id,
                 created_at=e.created_at,
                 amount_cents=e.amount_cents,
                 currency=e.currency,
@@ -388,6 +390,7 @@ class StatementRepository:
         entries.extend(
             RawStatementEntry(
                 kind="settlement",
+                entry_id=s.id,
                 created_at=s.created_at,
                 amount_cents=s.amount_cents,
                 currency=s.currency,

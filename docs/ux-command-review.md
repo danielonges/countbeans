@@ -46,15 +46,18 @@ commits); the date is omitted on individual items to keep them readable.
 | 1 | Bare `/void` wrote instantly; `/help` invited it | 4 | ✅ |
 | 2 | Suggested transfers were dead text (no tap-to-settle) | 3 | ✅ |
 | 3 | Settlements couldn't be undone | 3 | ✅ |
-| 4 | Only the most recent expense was correctable | 3 | ✅ |
+| 4 | Only the most recent entry was correctable | 3 | ✅ |
 | 5 | Mode (active-event) visibility inconsistent on reads | 2–3 | ◑ |
 | 6 | `/event` recall-heavy, zero buttons | 3 | ✅ |
 | 7 | Read commands silently swallow bad arguments | 2 | ✅ |
 
-The four headline findings (1–4) and the `/event` buttonization (6) shipped;
-what remains is scope-labeling on reads (5), unrecognized-arg notes (7), the
-`/event` toggle-roster editor, a void entry point from `/statements`, and the
-onboarding/wording polish. Details per command below.
+**All seven headline findings are now shipped**, along with the per-command
+recommendations they implied (tap-to-settle, the `/balance` pivot, scope
+labels, the `/event` action buttons + roster editor, the void-from-`/statements`
+entry point, and the onboarding/wording polish). The only deliberately deferred
+items left are ones tied to features outside this review's scope (named
+cross-scope reads, localized timestamps, `/event reopen`) — noted inline where
+they arise. Details per command below.
 
 ---
 
@@ -90,12 +93,13 @@ onboarding/wording polish. Details per command below.
    balances re-derive; statements show them struck out). Either party to the
    settlement — or an admin — may void it.
 
-4. ✅ **Only the most recent expense was correctable.** Discovering
-   yesterday's error led to a dead end. (H3 + H6, sev 3.)
+4. ✅ **Only the most recent entry was correctable.** Discovering yesterday's
+   error led to a dead end. (H3 + H6, sev 3.)
    **Fixed:** the `/void` preview steps back through the last 10 entries in
-   scope (⬅ Older / Newer ➡). An entry the caller can't void still previews —
-   naming who can — so they can step on to their own.
-   **Still open:** a void entry point directly from `/statements`.
+   scope (⬅ Older / Newer ➡), *and* `/statements` now has a "🗑️ Void an entry"
+   button — pick any visible entry (older than the /void window too), confirm,
+   and it voids (reusing the `/void` confirm path). An entry the caller can't
+   void still previews, naming who can.
 
 5. ◑ **Mode visibility is inconsistent.** Active-event mode changes what every
    write and read means, but the reads didn't signal scope. (H1, sev 2–3.)
@@ -182,17 +186,19 @@ with a clear alert, and the wizard anchor is owner-bound. The same gate makes
 real Pause/Resume/Close buttons; and the welcome's "run /join" is a "✋ Count me
 in" button.
 
-### T3 — Mode (active event) needs consistent signaling ☐ (H1 · sev 2–3)
+### T3 — Mode (active event) needs consistent signaling ✅ (H1 · sev 2–3)
 
 Active-event mode is a classic mode in the NN/g sense: identical input means
-different things depending on invisible state. The product handles this well on
+different things depending on invisible state. The product handled this well on
 *writes* (receipts echo the scope; `#general` overrides are confirmed) but
-inconsistently on *reads*: `/balance` headers name the event, `/statements`
-headers don't, and `/group` omits the active event entirely. Anywhere money is
-displayed, the scope it was filtered by should be named. (Note: *named
-cross-scope reads* — e.g. reading general while an event is active — are a
-separate, deliberately deferred feature; this finding is only about labeling
-what is already shown.)
+inconsistently on *reads*: `/balance` headers named the event, `/statements`
+didn't, and `/group` omitted the active event entirely.
+
+**Fixed:** `/balance` already named its scope; `/group` now states the active
+event (or "none — general"), and `/statements` — which is cross-scope — tags
+each entry with its event (🏷️). (Note: *named cross-scope reads* — e.g. reading
+general while an event is active — remain a separate, deliberately deferred
+feature; this finding was only about labeling what is already shown.)
 
 ### T4 — Forgiving parsing has tipped into silent misdirection ✅ (H9 · sev 2)
 
@@ -302,11 +308,12 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
   a trip a general expense and a trip expense sat side by side, indistinguishable.
   **Fixed:** each entry is now tagged with its event (🏷️ <name>); general
   entries are untagged.
-- ◑ **(H3/H6, sev 3 → 2)** The statement is where users *discover* mistakes —
-  and it offers no path to correct any of them.
-  **Mitigated:** `/void` now steps back through the last 10 entries (both
-  kinds), so anything recently visible in a statement is reachable without IDs.
-  **Still open:** acting on an entry directly from the statement page itself.
+- ✅ **(H3/H6, sev 3)** The statement is where users *discover* mistakes — and
+  it offered no path to correct any of them.
+  **Fixed:** a "🗑️ Void an entry" button on the statement opens a pick mode
+  (each voidable entry becomes a button); picking one shows a permission-aware
+  confirm whose "Yes" reuses the `/void` machinery. Reaches any visible entry,
+  including ones older than the `/void` browse window.
 - ✅ **(H9, sev 2)** Silent argument swallowing, as with `/balance` (theme T4).
   **Fixed:** same `parse_view_selector` note here.
 - ✅ **(H1, sev 1)** Timestamps carried no timezone hint. **Fixed:** a "🕓 Times
@@ -318,10 +325,10 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
 - ✅ Surface the scope of each entry. *(Implemented as per-entry 🏷️ tags
   rather than a header rename, since the view is cross-scope — see the finding
   above.)*
-- ☐ Treat the statement as the entry point for corrections: from a statement
-  view, a member should be able to initiate voiding one of *their* visible
-  entries (selection by tapping, never by typing an ID). Same ownership and
-  admin rules as `/void` today.
+- ✅ Treat the statement as the entry point for corrections: from a statement
+  view, a member can initiate voiding one of their visible entries (selection by
+  tapping, never by typing an ID), with the same ownership and admin rules as
+  `/void`.
 - ✅ Add the unrecognized-argument note (shared with `/balance`).
 
 **Wizard verdict:** **no wizard.** Extend the existing button surface (scope
@@ -544,8 +551,9 @@ command, and per-currency activity totals.
   /statements all · /event info".
 
 **Recommendations:** ✅ add an "Active event" line (or "none — new expenses are
-general") to the snapshot *(done)*; ☐ optionally close with one line of
-related-command pointers. Nothing structural.
+general") to the snapshot, and ✅ close with one line of related-command
+pointers ("See more: /balance all · /statements all · /event info"). Nothing
+structural.
 
 **Wizard verdict:** **no.** It's a status read and a good one.
 
@@ -566,9 +574,11 @@ past entries keep their currency" — excellent H1).
   admin-only and rare, severity is low — but the confirmation carrying the code
   prominently is what makes the slip catchable, so that wording must stay.
 
-**Recommendations:** none required. If polish budget exists: ☐ confirm unfamiliar
-codes ("USE isn't a currency I recognize — set it anyway?") while letting
-real-but-obscure codes through.
+**Recommendations:** none required. The "confirm unfamiliar codes" idea is
+**deliberately declined** — it would reintroduce a currency known-set, and the
+codebase's settled design is "no ISO-4217 registry; trust 3-letter codes by
+shape" (see `parse_money`). The catchable confirmation wording stays; that's the
+chosen mitigation.
 
 **Wizard verdict:** **no.**
 
@@ -630,8 +640,8 @@ already been mentioned in expenses here — I've linked those to you").
 | `/void` | One-screen preview + confirm | ✅ shipped (preview, browse, settlements) |
 | `/event` | No (buttonize status) | ✅ action buttons + toggle-roster editor shipped |
 | `/balance` | No | ✅ tap-to-settle + me⇄all pivot shipped |
-| `/statements` | No | ☐ scope label in header; ☐ void-from-statement entry point |
-| `/group` | No | ☐ active-event line |
+| `/statements` | No | ✅ per-entry scope tags + void-from-statement shipped |
+| `/group` | No | ✅ active-event line + related-command exits |
 | `/simplify` | No | ✅ explanatory clause in replies |
 | `/currency` | No | — |
 | `/start` `/join` `/help` | No | ✅ truthful help tip, join button, shorter welcome |
@@ -648,10 +658,10 @@ already been mentioned in expenses here — I've linked those to you").
    under `/balance` and `/balance all`). Biggest friction reduction in the core
    loop. Shipped: one tap records the payment in full, announces it to the chat,
    and repaints the view; stale buttons alert instead of writing.
-3. ◑ **Undo coverage** — settlements voidable; older entries reachable from the
-   `/void` preview. Shipped: settlement voiding (schema + derivation + struck-out
-   statements) and ⬅ Older / Newer ➡ stepping through the last 10 entries.
-   **Open:** a void entry point directly from `/statements` pages.
+3. ✅ **Undo coverage** — settlements voidable; older entries reachable. Shipped:
+   settlement voiding (schema + derivation + struck-out statements), ⬅ Older /
+   Newer ➡ stepping through the last 10 entries in the `/void` preview, *and* a
+   "🗑️ Void an entry" entry point on `/statements` reaching any visible entry.
 4. ✅ **Buttonize `/event` status replies + toggle-roster editing.** Shipped:
    Pause/Resume/Close buttons (admin-gated at tap, chat-announced, stale-safe),
    tapped-mention removal, the unsettled-removal warning, and a paged
@@ -661,5 +671,4 @@ already been mentioned in expenses here — I've linked those to you").
 6. ✅ **Onboarding polish** (welcome restructure + "✋ Count me in" join button)
    and plain-language wording for simplified/raw.
 
-Priorities 1–2 and 4–6 are complete; 3 is done except for one follow-up —
-a void entry point directly from `/statements`.
+All six priorities are complete.

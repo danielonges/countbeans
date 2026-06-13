@@ -5,10 +5,11 @@ Exercises the callback path the service tests can't: the owner-binding check
 edit_text.
 """
 
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from countbeans.db.models import Settlement
+from countbeans.db.models import Expense, Settlement
 from countbeans.services.repositories import SettlementRepository
 
 from ._bot_harness import MockedBot, feed, feed_callback, make_callback, make_message
@@ -154,6 +155,167 @@ async def test_statements_flag_voided_settlement(
     reply = bot.last_reply or ""
     assert "❌ 💸" in reply
     assert "(voided)" in reply
+
+
+def _sent_buttons(bot: MockedBot) -> list[tuple[str, str]]:
+    markup = bot.sent[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup), "reply carries no keyboard"
+    return [
+        (b.text, b.callback_data or "") for row in markup.inline_keyboard for b in row
+    ]
+
+
+def _edit_buttons(bot: MockedBot) -> list[tuple[str, str]]:
+    markup = bot.edits[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup), "edit carries no keyboard"
+    return [
+        (b.text, b.callback_data or "") for row in markup.inline_keyboard for b in row
+    ]
+
+
+async def test_void_from_statement_full_flow(dispatcher, session: AsyncSession) -> None:
+    """Statement → 🗑️ Void an entry → pick the entry → confirm → it's voided
+    (the confirm's Yes reuses void.py's vd: path)."""
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    await seed_expense(
+        session,
+        group,
+        payer=caller,
+        participants=[caller],
+        amount_cents=1000,
+        description="oops",
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements all", from_id=1001, username="caller"),
+        session=session,
+    )
+    void_entry_btn = next(d for _, d in _sent_buttons(bot) if d.startswith("sv:m:"))
+
+    # Enter pick mode.
+    await feed_callback(
+        dispatcher, bot, make_callback(void_entry_btn, from_id=1001), session=session
+    )
+    pick = next(d for t, d in _edit_buttons(bot) if d.startswith("sv:k:"))
+    assert "Tap an entry to void" in (bot.last_edit or "")
+
+    # Pick the entry → confirm screen with a Yes (vd:ok) button.
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback(pick, from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "Void this expense" in (bot.last_edit or "")
+    yes = next(d for _, d in _edit_buttons(bot) if d.startswith("vd:ok:"))
+
+    # Confirm → void.py records the void.
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback(yes, from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "Voided" in (bot.last_edit or "")
+    voided_at = (await session.execute(select(Expense.voided_at))).scalar_one()
+    assert voided_at is not None
+
+
+async def test_void_from_statement_cancel_returns_to_statement(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    await seed_expense(
+        session, group, payer=caller, participants=[caller], amount_cents=1000
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements all", from_id=1001, username="caller"),
+        session=session,
+    )
+    void_btn = next(d for _, d in _sent_buttons(bot) if d.startswith("sv:m:"))
+    await feed_callback(
+        dispatcher, bot, make_callback(void_btn, from_id=1001), session=session
+    )
+    cancel = next(d for _, d in _edit_buttons(bot) if d.startswith("sv:c:"))
+    await feed_callback(
+        dispatcher, bot, make_callback(cancel, from_id=1001), session=session
+    )
+
+    assert "Group statement" in (bot.last_edit or "")  # back to the statement
+
+
+async def test_void_from_statement_blocks_non_party(
+    dispatcher, session: AsyncSession
+) -> None:
+    """On a group statement, picking an entry you can't void shows who can and
+    offers no Yes button."""
+    group = await seed_group(session)
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    await seed_member(session, group, telegram_user_id=1001, username="caller")
+    await seed_expense(session, group, payer=bob, participants=[bob], amount_cents=1000)
+
+    bot = MockedBot(caller_is_admin=False)
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements all", from_id=1001, username="caller"),
+        session=session,
+    )
+    void_btn = next(d for _, d in _sent_buttons(bot) if d.startswith("sv:m:"))
+    await feed_callback(
+        dispatcher, bot, make_callback(void_btn, from_id=1001), session=session
+    )
+    pick = next(d for _, d in _edit_buttons(bot) if d.startswith("sv:k:"))
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback(pick, from_id=1001, username="caller"),
+        session=session,
+    )
+
+    assert "Only @bob" in (bot.last_edit or "")
+    assert not any(d.startswith("vd:ok:") for _, d in _edit_buttons(bot))
+
+
+async def test_void_pick_on_personal_statement_is_owner_bound(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    await seed_expense(
+        session, group, payer=caller, participants=[caller], amount_cents=1000
+    )
+
+    bot = MockedBot()
+    # caller opens their personal statement…
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements", from_id=1001, username="caller"),
+        session=session,
+    )
+    void_btn = next(d for _, d in _sent_buttons(bot) if d.startswith("sv:m:"))
+    # …bob taps the void button on it → rejected (it's not bob's statement).
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback(void_btn, from_id=2002, username="bob"),
+        session=session,
+    )
+    answer = bot.last_answer
+    assert answer is not None and answer.show_alert
+    assert "not your statement" in (answer.text or "").lower()
+    assert not bot.edits
 
 
 async def test_statements_other_users_page_is_rejected(

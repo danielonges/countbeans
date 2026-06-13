@@ -1,5 +1,6 @@
 """Unit tests for /statements rendering and pagination-keyboard logic."""
 
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,7 @@ _WHEN = datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc)
 
 _EXPENSE = StatementEntry(
     kind="expense",
+    entry_id=uuid.UUID(int=1),
     created_at=_WHEN,
     amount_cents=2550,
     currency="SGD",
@@ -22,6 +24,7 @@ _EXPENSE = StatementEntry(
 
 _SETTLEMENT = StatementEntry(
     kind="settlement",
+    entry_id=uuid.UUID(int=2),
     created_at=_WHEN,
     amount_cents=1000,
     currency="SGD",
@@ -108,32 +111,67 @@ def test_render_header_has_page_and_total():
     assert "9 total" in text
 
 
+def _nav_row(kb):
+    """The Prev/Next row (row 0 when present) — the void-entry button is a
+    separate row below it."""
+    return [
+        b
+        for row in kb.inline_keyboard
+        for b in row
+        if (b.callback_data or "").startswith("stmt:")
+    ]
+
+
+def _void_button(kb):
+    return next(
+        (
+            b
+            for row in kb.inline_keyboard
+            for b in row
+            if (b.callback_data or "").startswith("sv:m:")
+        ),
+        None,
+    )
+
+
 def test_keyboard_first_page_has_only_next():
-    kb = _keyboard(_page([_expense()], page=0, page_size=8, total=20), "stmt:g")
+    kb = _keyboard(_page([_expense()], page=0, page_size=8, total=20), "stmt:g", "g")
     assert kb is not None
-    buttons = kb.inline_keyboard[0]
-    assert [b.text for b in buttons] == ["Next ▶"]
-    assert buttons[0].callback_data == "stmt:g:1"
+    nav = _nav_row(kb)
+    assert [b.text for b in nav] == ["Next ▶"]
+    assert nav[0].callback_data == "stmt:g:1"
 
 
 def test_keyboard_last_page_has_only_prev():
-    kb = _keyboard(_page([_expense()], page=2, page_size=8, total=20), "stmt:g")
+    kb = _keyboard(_page([_expense()], page=2, page_size=8, total=20), "stmt:g", "g")
     assert kb is not None
-    buttons = kb.inline_keyboard[0]
-    assert [b.text for b in buttons] == ["◀ Prev"]
-    assert buttons[0].callback_data == "stmt:g:1"
+    nav = _nav_row(kb)
+    assert [b.text for b in nav] == ["◀ Prev"]
+    assert nav[0].callback_data == "stmt:g:1"
 
 
 def test_keyboard_middle_page_has_both():
-    kb = _keyboard(_page([_expense()], page=1, page_size=8, total=20), "stmt:u:42")
-    assert kb is not None
-    buttons = kb.inline_keyboard[0]
-    assert [b.text for b in buttons] == ["◀ Prev", "Next ▶"]
-    assert buttons[0].callback_data == "stmt:u:42:0"
-    assert buttons[1].callback_data == "stmt:u:42:2"
-
-
-def test_keyboard_single_page_is_none():
-    assert (
-        _keyboard(_page([_expense()], page=0, page_size=8, total=3), "stmt:g") is None
+    kb = _keyboard(
+        _page([_expense()], page=1, page_size=8, total=20), "stmt:u:42", "u42"
     )
+    assert kb is not None
+    nav = _nav_row(kb)
+    assert [b.text for b in nav] == ["◀ Prev", "Next ▶"]
+    assert nav[0].callback_data == "stmt:u:42:0"
+    assert nav[1].callback_data == "stmt:u:42:2"
+
+
+def test_keyboard_single_page_has_void_button_only():
+    # No paging needed, but a voidable entry → just the "Void an entry" button.
+    kb = _keyboard(_page([_expense()], page=0, page_size=8, total=3), "stmt:g", "g")
+    assert kb is not None
+    assert _nav_row(kb) == []
+    vb = _void_button(kb)
+    assert vb is not None and vb.callback_data == "sv:m:g:0"
+
+
+def test_keyboard_all_voided_page_has_no_void_button():
+    kb = _keyboard(
+        _page([_expense(voided=True)], page=0, page_size=8, total=1), "stmt:g", "g"
+    )
+    assert kb is None  # nothing to page, nothing to void

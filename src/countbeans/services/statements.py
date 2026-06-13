@@ -56,6 +56,7 @@ async def get_statement_page(
         entries.append(
             StatementEntry(
                 kind=e.kind,
+                entry_id=e.entry_id,
                 created_at=e.created_at,
                 amount_cents=e.amount_cents,
                 currency=e.currency,

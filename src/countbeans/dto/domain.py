@@ -92,6 +92,7 @@ class StatementEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["expense", "settlement"]
+    entry_id: uuid.UUID  # the ledger row's id — addressable for void-from-statement
     created_at: datetime
     amount_cents: int
     currency: str
