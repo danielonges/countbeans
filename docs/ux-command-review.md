@@ -77,10 +77,15 @@ recommends changes at the feature level only — no implementation notes.
    write and read means, but `/statements` doesn't say which scope it's
    showing, and `/group` — the "group info" command — doesn't mention the
    active event at all. (H1, severity 2–3.)
-6. **`/event` is the most recall-heavy surface left** — eight text
-   subcommands, admin semantics, a pause-vs-close model users predictably
-   trip on, and zero buttons even on replies that describe exactly which
-   actions are available next. (H6 + H5, severity 3.)
+6. ✅ **MOSTLY FIXED 2026-06-13** — **`/event` is the most recall-heavy
+   surface left** — eight text subcommands, admin semantics, a pause-vs-close
+   model users predictably trip on, and zero buttons even on replies that
+   describe exactly which actions are available next. (H6 + H5, severity 3.)
+   *Fix: `/event info` and bare `/event` now carry the legal transitions as
+   buttons (Pause/Close while active, Resume/Close while paused) — admin-gated
+   at tap, announced to the chat, stale-safe. Removing an unsettled member
+   warns; tap-mentioned members can be removed by tap (the unremovable-member
+   edge is gone). Outstanding: the toggle-roster editor.*
 7. **Read commands silently swallow bad arguments.** `/balance al` (typo)
    shows your *personal* balance with no hint that the argument was ignored —
    the user may believe they're looking at the group view. (H9, severity 2.)
@@ -142,8 +147,9 @@ clear alert, and the wizard anchor is owner-bound. The same gate makes
 tap it.
 
 > ✅ **PARTIALLY FIXED 2026-06-13** — the settle-up half shipped (tap-to-pay
-> on bare `/settleup`, `/balance`, and `/balance all`, debtor-gated). Still
-> prose-only: `/event info`'s action hints and the welcome's "run /join".
+> on bare `/settleup`, `/balance`, and `/balance all`, debtor-gated), and
+> `/event info`'s action hints became real Pause/Resume/Close buttons. Still
+> prose-only: the welcome's "run /join".
 
 ### T3 — Mode (active event) needs consistent signaling (H1 · severity 2–3)
 
@@ -444,24 +450,23 @@ refusal and error messages consistently say what to do instead. The
 
 **Findings:**
 
-1. **(H6, sev 3)** The family's own replies prove the point: `/event info`
-   *prints* "/event pause • /event close" as text the admin must retype.
-   The system knows the state and the legal transitions; the user supplies
-   keystrokes (theme T2).
-2. **(H5/H2, sev 3)** The pause-vs-close model is the family's recurring
-   trap, and the product knows it (the "already open — close it first"
-   error exists because people pause an event, forget it, and weeks later
-   can't start a new one). The error recovers well, but prevention is
-   available: the state is always shown — the *actions* on it aren't.
-3. **(H4, sev 2)** A member added to the roster by tapped mention (no public
-   username) can never be removed — removal only accepts a typed `@handle`.
-   The add path and remove path accept different identifier families, and
-   the asymmetry creates an unremovable roster entry.
-4. **(H5, sev 2)** Removing someone with outstanding event balances is
-   silent and unconditional. Their debts persist in the ledger (correct) but
-   vanish from the visible roster (confusing at settle-up time). A
-   non-blocking warning at removal — mirroring the coverage-warning
-   philosophy — would prevent the later "who is this debt for?" moment.
+1. ✅ **FIXED 2026-06-13** — **(H6, sev 3)** The family's own replies proved
+   the point: `/event info` *printed* "/event pause • /event close" as text
+   the admin must retype (theme T2). *Fix: the status views carry the legal
+   transitions as buttons; the prose hint is gone.*
+2. ✅ **FIXED 2026-06-13** — **(H5/H2, sev 3)** The pause-vs-close model is
+   the family's recurring trap. *Fix: the state and its actions are now one
+   surface — a paused event shows Resume/Close buttons, so the
+   forgotten-pause dead end resolves in one tap. A stale button (someone else
+   already closed) answers gracefully and repaints.*
+3. ✅ **FIXED 2026-06-13** — **(H4, sev 2)** A member added to the roster by
+   tapped mention (no public username) could never be removed — removal only
+   accepted a typed `@handle`. *Fix: `/event remove` accepts a tapped mention
+   too, resolved by Telegram id like the add path.*
+4. ✅ **FIXED 2026-06-13** — **(H5, sev 2)** Removing someone with outstanding
+   event balances was silent and unconditional. *Fix: removal now appends a
+   non-blocking warning naming the unsettled amounts — their ledger entries
+   survive and still count.*
 5. **(H6, sev 2)** Editing a roster by typing one handle per message is the
    exact task the `/addexpense` wizard already solved with a paged toggle
    roster.
@@ -472,18 +477,19 @@ refusal and error messages consistently say what to do instead. The
 
 **Recommendations (feature level):**
 
-- **Not a wizard — state-aware action buttons on the status replies.**
-  `/event info` and bare `/event` should carry the legal transitions as
-  buttons for admins (Pause/Close while active; Resume/Close while paused),
-  with the existing admin gate deciding tappability. This removes most of
-  the subcommand recall at zero added steps, and turns the paused-event
-  trap into a visible, one-tap recovery.
+- ✅ **FIXED 2026-06-13** — **Not a wizard — state-aware action buttons on
+  the status replies.** `/event info` and bare `/event` should carry the
+  legal transitions as buttons for admins (Pause/Close while active;
+  Resume/Close while paused), with the existing admin gate deciding
+  tappability. This removes most of the subcommand recall at zero added
+  steps, and turns the paused-event trap into a visible, one-tap recovery.
 - Roster editing should offer the toggle-roster pattern from the
   `/addexpense` wizard (tap members in/out), reachable from `/event info`.
-  Typed add/remove stays as the accelerator. This also resolves the
-  unremovable-member asymmetry, since tapping doesn't need a handle.
-- Add the non-blocking warning when removing a roster member with
-  outstanding balances in the event.
+  Typed add/remove stays as the accelerator. *(Still outstanding — but the
+  unremovable-member asymmetry it would have fixed was closed directly on
+  2026-06-13: `/event remove` now accepts tapped mentions.)*
+- ✅ **FIXED 2026-06-13** — Add the non-blocking warning when removing a
+  roster member with outstanding balances in the event.
 - Event creation can stay typed (a name is keyboard-natural); the only
   guided piece worth considering is a currency suggestion after creation,
   and only if real groups show currency-setting mistakes.
@@ -596,7 +602,7 @@ already been mentioned in expenses here — I've linked those to you").
 | `/addexpense` | Has one (baseline) | — |
 | `/settleup` | **Yes — one-screen suggestion picker** ✅ shipped 2026-06-13 | ~~Tap-to-pay buttons~~ ✅; typed form stays as accelerator |
 | `/void` | One-screen **preview + confirm** ✅ shipped 2026-06-13 | ~~Bare must show, not do~~ ✅; ~~reach older entries~~ ✅; ~~cover settlements~~ ✅ |
-| `/event` | No | State-aware action buttons on `/event info` / bare `/event`; toggle-roster for add/remove |
+| `/event` | No | ~~State-aware action buttons~~ ✅ shipped 2026-06-13; toggle-roster for add/remove still open |
 | `/balance` | No | me⇄all pivot button; debtor-gated tap-to-settle on suggestions |
 | `/statements` | No | Scope label in header; entry-level void entry point |
 | `/group` | No | Active-event line |
@@ -624,9 +630,12 @@ already been mentioned in expenses here — I've linked those to you").
    voiding (schema + derivation + struck-out statements) and ⬅ Older / Newer ➡
    stepping through the last 10 entries in the `/void` preview. Outstanding:
    a void entry point directly from `/statements` pages.*
-4. **Buttonize `/event` status replies + toggle-roster editing.** Converts
-   the most recall-heavy remaining command family; also fixes the
-   unremovable-member edge.
+4. ✅ **MOSTLY FIXED 2026-06-13** — **Buttonize `/event` status replies +
+   toggle-roster editing.** Converts the most recall-heavy remaining command
+   family; also fixes the unremovable-member edge. *Shipped: Pause/Resume/
+   Close buttons on the status views (admin-gated at tap, chat-announced,
+   stale-safe), tapped-mention removal, and the unsettled-removal warning.
+   Outstanding: the toggle-roster editor.*
 5. **Scope labeling sweep** (`/statements` header, `/group` active-event
    line) and the unrecognized-argument notes on read commands.
 6. **Onboarding polish** (welcome restructure + join button), plain-language

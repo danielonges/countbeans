@@ -1,13 +1,32 @@
 """Handler tests for /event and active-event wiring in /addexpense, /settleup, /balance."""
 
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import Expense, Settlement
-from countbeans.services.repositories import EventRepository
+from countbeans.services.repositories import (
+    EventRepository,
+    GroupMemberRepository,
+    UserRepository,
+)
 
-from ._bot_harness import MockedBot, feed, make_message
+from ._bot_harness import (
+    MockedBot,
+    feed,
+    feed_callback,
+    make_callback,
+    make_message,
+    text_mention_entity,
+)
 from ._seed import read_group, seed_event, seed_expense, seed_group, seed_member
+
+
+def _kb_data(bot: MockedBot) -> list[str]:
+    """callback_data values on the most recent reply's keyboard."""
+    markup = bot.sent[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup), "reply carries no keyboard"
+    return [b.callback_data or "" for row in markup.inline_keyboard for b in row]
 
 
 async def test_event_info_shows_status_roster_outstanding(
@@ -324,6 +343,189 @@ async def test_event_add_all_folds_group_onto_roster(
         session=session,
     )
     assert "already on" in (bot.last_reply or "").lower()
+
+
+async def test_event_info_carries_state_buttons(
+    dispatcher, session: AsyncSession
+) -> None:
+    """The status views offer the legal transitions as buttons: Pause/Close
+    while active, Resume/Close while paused."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=True)
+
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    assert set(_kb_data(bot)) == {"ev:pause", "ev:close"}
+
+    await feed(
+        dispatcher, bot, make_message("/event pause", from_id=1001), session=session
+    )
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    assert set(_kb_data(bot)) == {"ev:resume", "ev:close"}
+
+    # Bare /event (the usage + status view) carries the same buttons.
+    await feed(dispatcher, bot, make_message("/event", from_id=1001), session=session)
+    assert set(_kb_data(bot)) == {"ev:resume", "ev:close"}
+
+
+async def test_event_buttons_pause_resume_close(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Tapping the buttons walks the same lifecycle as the typed subcommands:
+    each flip is announced to the chat and the tapped view repaints."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=True)
+
+    await feed_callback(
+        dispatcher, bot, make_callback("ev:pause", from_id=1001), session=session
+    )
+    assert (await read_group(session)).active_event_id is None
+    assert "Paused" in (bot.sent[-1].text or "")  # announced, not just edited
+    assert "paused" in (bot.last_edit or "")  # the view repainted
+
+    await feed_callback(
+        dispatcher, bot, make_callback("ev:resume", from_id=1001), session=session
+    )
+    assert (await read_group(session)).active_event_id == ev.event_id
+    assert "Resumed" in (bot.sent[-1].text or "")
+    assert "active" in (bot.last_edit or "")
+
+    await feed_callback(
+        dispatcher, bot, make_callback("ev:close", from_id=1001), session=session
+    )
+    closed = await EventRepository(session).get(ev.event_id)
+    assert closed is not None and closed.status == "closed"
+    assert "Closed" in (bot.sent[-1].text or "")
+    assert "No event is open" in (bot.last_edit or "")
+
+
+async def test_event_buttons_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=False)
+
+    await feed_callback(
+        dispatcher, bot, make_callback("ev:pause", from_id=2002), session=session
+    )
+
+    answer = bot.last_answer
+    assert answer is not None and answer.show_alert
+    assert "admins" in (answer.text or "").lower()
+    assert (await read_group(session)).active_event_id == ev.event_id  # unchanged
+
+
+async def test_event_stale_button_after_close(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A button tapped after the event already closed answers gracefully and
+    repaints to the no-event state instead of acting."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=True)
+
+    await feed(
+        dispatcher, bot, make_message("/event close", from_id=1001), session=session
+    )
+    await feed_callback(
+        dispatcher, bot, make_callback("ev:pause", from_id=1001), session=session
+    )
+
+    assert "No open event" in (bot.last_answer.text or "" if bot.last_answer else "")
+    assert "No event is open" in (bot.last_edit or "")
+
+
+async def test_event_remove_warns_when_member_unsettled(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Removing someone who still has a balance in the event warns (non-blocking)
+    — their ledger entries survive the roster edit and still count."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher, bot, make_message("/event add @bob", from_id=1001), session=session
+    )
+    # creator fronts SGD 10 split with bob inside the event → bob owes SGD 5.
+    await seed_expense(
+        session,
+        group,
+        payer=creator,
+        participants=[creator, bob],
+        amount_cents=1000,
+        event_id=ev.event_id,
+    )
+
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/event remove @bob", from_id=1001),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "Removed @bob" in reply
+    assert "⚠️" in reply and "isn't settled" in reply
+    assert "5.00" in reply and "they owe" in reply
+    # The roster edit still happened — the warning never blocks.
+    roster = await EventRepository(session).list_members(ev.event_id)
+    assert not any(m.username == "bob" for m in roster)
+
+
+async def test_event_remove_by_text_mention(dispatcher, session: AsyncSession) -> None:
+    """A member without a public @handle (added by tap) can be removed by tap
+    too — the asymmetry that used to make them unremovable is gone."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    # Carol has no public username — only reachable via text_mention.
+    carol = await UserRepository(session).upsert(
+        telegram_user_id=3003, username=None, first_name="Carol", last_name=None
+    )
+    await GroupMemberRepository(session).ensure_member(group.id, carol.id)
+    await EventRepository(session).ensure_member(ev.event_id, carol.id)
+
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher,
+        bot,
+        make_message(
+            "/event remove Carol",
+            from_id=1001,
+            entities=[
+                text_mention_entity(3003, first_name="Carol", offset=14, length=5)
+            ],
+        ),
+        session=session,
+    )
+
+    assert "Removed Carol" in (bot.last_reply or "")
+    roster = await EventRepository(session).list_members(ev.event_id)
+    assert not any(m.first_name == "Carol" for m in roster)
 
 
 async def test_event_remove_all_refused(dispatcher, session: AsyncSession) -> None:

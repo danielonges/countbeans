@@ -23,16 +23,24 @@ import logging
 import re
 import uuid
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.enums import MessageEntityType
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, User
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    User,
+)
 
 from countbeans.bot.utils.context import resolve_chat_context
 from countbeans.bot.utils.formatting import display_name, format_money
 from countbeans.bot.utils.parsing import extract_quoted_description, is_all
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.db.models import Event, Group
+from countbeans.db.models import User as DbUser
 from countbeans.dto.commands import (
     CreateEventCommand,
     EditEventRosterCommand,
@@ -241,7 +249,8 @@ async def _roster(
 
     # A text_mention (a user without a public @handle, or tap-selected) carries a
     # real telegram_user_id → resolve to a claimed user, never a username
-    # placeholder (security review #1). Supported for `add`; removal is by @handle.
+    # placeholder (security review #1). Supported on both edits — without it on
+    # `remove`, a member added by tap could never be taken off again.
     text_mention = next(
         (
             e
@@ -250,10 +259,15 @@ async def _roster(
         ),
         None,
     )
-    if action == "add" and text_mention is not None and text_mention.user is not None:
-        await _roster_add_text_mention(
-            message, uow, group, open_event, text_mention.user
-        )
+    if text_mention is not None and text_mention.user is not None:
+        if action == "add":
+            await _roster_add_text_mention(
+                message, uow, group, open_event, text_mention.user
+            )
+        else:
+            await _roster_remove_text_mention(
+                message, uow, group, open_event, text_mention.user
+            )
         return
 
     mention = _MENTION_RE.search(rest)
@@ -277,7 +291,7 @@ async def _roster(
     if action == "add":
         await _roster_add_handle(message, uow, group, open_event, handle)
     else:
-        await _roster_remove_handle(message, uow, open_event, handle)
+        await _roster_remove_handle(message, uow, group, open_event, handle)
 
 
 async def _roster_add_text_mention(
@@ -349,12 +363,45 @@ async def _roster_add_handle(
 
 
 async def _roster_remove_handle(
-    message: Message, uow: UnitOfWork, open_event: Event, handle: str
+    message: Message, uow: UnitOfWork, group: Group, open_event: Event, handle: str
 ) -> None:
     user = await uow.users.find_by_mention(handle)
     if user is None:
         await message.reply(f"I don't know @{handle} — nothing to remove.")
         return
+    await _remove_user(message, uow, group, open_event, user, f"@{handle}")
+
+
+async def _roster_remove_text_mention(
+    message: Message, uow: UnitOfWork, group: Group, open_event: Event, tu: User
+) -> None:
+    """Remove a tap-mentioned member (no public @handle needed) — the mirror of
+    the text_mention add path, resolved by telegram id, never by username."""
+    user = await uow.users.get_by_telegram_id(tu.id)
+    if user is None:
+        await message.reply(f"I don't know {tu.first_name} — nothing to remove.")
+        return
+    await _remove_user(
+        message,
+        uow,
+        group,
+        open_event,
+        user,
+        display_name(user.username, user.first_name),
+    )
+
+
+async def _remove_user(
+    message: Message,
+    uow: UnitOfWork,
+    group: Group,
+    open_event: Event,
+    user: DbUser,
+    label: str,
+) -> None:
+    """The shared tail of both remove grammars: drop the roster row and, when
+    the member leaves unsettled, append a non-blocking warning (the ledger keeps
+    their entries either way — removal is roster-only)."""
     changed = await edit_event_roster(
         uow,
         EditEventRosterCommand(
@@ -362,7 +409,7 @@ async def _roster_remove_handle(
         ),
     )
     if not changed:
-        await message.reply(f'@{handle} isn\'t on the "{open_event.name}" roster.')
+        await message.reply(f'{label} isn\'t on the "{open_event.name}" roster.')
         return
     logger.info(
         "Event roster remove: event_id=%s user_id=%s changed=%s",
@@ -370,8 +417,29 @@ async def _roster_remove_handle(
         user.id,
         changed,
     )
-    await _reply_with_roster(
-        message, uow, open_event, f'Removed @{handle} from "{open_event.name}".'
+    note = f'Removed {label} from "{open_event.name}".'
+    note += await _unsettled_warning(uow, group, open_event, user.id, label)
+    await _reply_with_roster(message, uow, open_event, note)
+
+
+async def _unsettled_warning(
+    uow: UnitOfWork, group: Group, open_event: Event, user_id: uuid.UUID, label: str
+) -> str:
+    """Warn (non-blocking, like the @all coverage warning) when a removed member
+    still has a balance in the event — so the later "whose debt is this?" moment
+    at settle-up time never happens. Empty string when they're settled."""
+    balances = await compute_balances(uow, group.id, event_id=open_event.id)
+    parts = [
+        f"{format_money(abs(cents), key.currency)} "
+        f"{'owed to them' if cents > 0 else 'they owe'}"
+        for key, cents in balances.items()
+        if key.user_id == user_id and cents != 0
+    ]
+    if not parts:
+        return ""
+    return (
+        f'\n⚠️ {label} isn\'t settled in "{open_event.name}" yet '
+        f"({', '.join(parts)}) — their entries stay on the ledger and still count."
     )
 
 
@@ -384,15 +452,33 @@ async def _reply_with_roster(
     await message.reply(f"{note}\nRoster: {_roster_str(roster)}")
 
 
-async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
+def _event_keyboard(is_active: bool) -> InlineKeyboardMarkup:
+    """The open event's legal transitions as buttons. Shown to everyone (the
+    callback re-checks the admin gate at tap and alerts non-admins), so the
+    state machine is visible — no recalling which subcommand fits which state."""
+    row = [
+        (
+            InlineKeyboardButton(text="⏸ Pause", callback_data="ev:pause")
+            if is_active
+            else InlineKeyboardButton(text="▶️ Resume", callback_data="ev:resume")
+        ),
+        InlineKeyboardButton(text="✅ Close", callback_data="ev:close"),
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+async def _info_view(
+    uow: UnitOfWork, group: Group
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """The /event info text + action keyboard — also what the ev: callbacks
+    repaint after a transition, so the view comes from one place."""
     open_event = (
         await uow.events.get(group.active_event_id) if group.active_event_id else None
     )
     if open_event is None:
         open_event = await uow.events.get_open(group.id)
     if open_event is None:
-        await message.reply('No event is open. Start one with /event new "<name>".')
-        return
+        return 'No event is open. Start one with /event new "<name>".', None
 
     is_active = group.active_event_id == open_event.id
     state = "active" if is_active else "paused"
@@ -412,23 +498,23 @@ async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
         lines.append(f"Outstanding: {', '.join(parts)}")
     else:
         lines.append("All settled up.")
-    hints = (
-        "/event resume • /event close"
-        if not is_active
-        else "/event pause • /event close"
-    )
-    lines.append(hints)
     # One-off general expense mid-event: #general beats pausing (no admin, no
     # forgotten resume). Surfaced here rather than nudged on every expense reply.
     if is_active:
         lines.append(
             'General (non-event) item? Add #general, e.g. /addexpense 12 "taxi" #general.'
         )
-    await message.reply("\n".join(lines))
+    return "\n".join(lines), _event_keyboard(is_active)
+
+
+async def _info(message: Message, uow: UnitOfWork, group: Group) -> None:
+    text, keyboard = await _info_view(uow, group)
+    await message.reply(text, reply_markup=keyboard)
 
 
 async def _status(message: Message, uow: UnitOfWork, group: Group) -> None:
     lines = [_USAGE]
+    keyboard: InlineKeyboardMarkup | None = None
     if group.active_event_id is not None:
         active = await uow.events.get(group.active_event_id)
         if active is not None:
@@ -437,6 +523,7 @@ async def _status(message: Message, uow: UnitOfWork, group: Group) -> None:
             lines.append(
                 f'\nActive event: "{active.name}"{cur} — roster: {_roster_str(roster)}'
             )
+            keyboard = _event_keyboard(is_active=True)
     else:
         open_event = await uow.events.get_open(group.id)
         if open_event is not None:
@@ -448,4 +535,102 @@ async def _status(message: Message, uow: UnitOfWork, group: Group) -> None:
             lines.append(
                 f'\nOpen but paused: "{open_event.name}"{cur} (/event resume to continue).'
             )
-    await message.reply("\n".join(lines))
+            keyboard = _event_keyboard(is_active=False)
+    await message.reply("\n".join(lines), reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("ev:"))
+async def on_event_action(callback: CallbackQuery, uow: UnitOfWork, bot: Bot) -> None:
+    """The status views' transition buttons: ev:pause / ev:resume / ev:close.
+
+    Admin-gated at tap (same rule and wording as the typed subcommands — the
+    buttons are visible to everyone so the state machine is, too). State is
+    re-checked against the group's *current* open event, so a stale button after
+    someone else already paused/closed answers gracefully instead of acting.
+    A successful transition is announced as a fresh chat message — a mode flip
+    everyone should see — and the tapped view repaints."""
+    parts = (callback.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if action not in ("pause", "resume", "close"):
+        await callback.answer()
+        return
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    chat = callback.message.chat
+
+    if not await is_admin(bot, chat.id, callback.from_user.id):
+        await callback.answer(
+            "Only group admins can manage events. Anyone can view the current "
+            "event with /event info.",
+            show_alert=True,
+        )
+        return
+
+    group = await uow.groups.upsert(
+        telegram_chat_id=chat.id, group_name=getattr(chat, "title", None)
+    )
+    open_event = await uow.events.get_open(group.id)
+    if open_event is None:
+        await _repaint_event_view(callback.message, uow, group)
+        await callback.answer("No open event any more.")
+        return
+
+    is_active = group.active_event_id == open_event.id
+    note: str | None = None
+    if action == "pause":
+        if not is_active:
+            await callback.answer(f'"{open_event.name}" is already paused.')
+        else:
+            await set_active_event(
+                uow, SetActiveEventCommand(group_id=group.id, event_id=None)
+            )
+            note = (
+                f'⏸ Paused "{open_event.name}". New expenses are general '
+                "until it's resumed."
+            )
+            await callback.answer("Paused")
+    elif action == "resume":
+        if is_active:
+            await callback.answer(f'"{open_event.name}" is already active.')
+        else:
+            await set_active_event(
+                uow, SetActiveEventCommand(group_id=group.id, event_id=open_event.id)
+            )
+            note = f'▶️ Resumed "{open_event.name}". New expenses tag to it again.'
+            await callback.answer("Resumed")
+    else:  # close
+        await close_event(
+            uow,
+            group.id,
+            SetEventStatusCommand(event_id=open_event.id, status="closed"),
+        )
+        note = (
+            f'✅ Closed "{open_event.name}". Start a new event with '
+            '/event new "<name>".'
+        )
+        await callback.answer("Closed")
+
+    if note is not None:
+        # The mode flip is shared state — announce it like the typed command
+        # would, not just a quiet edit.
+        await callback.message.answer(note)
+        logger.info(
+            "Event %s via button: event_id=%s group_id=%s by=%s",
+            action,
+            open_event.id,
+            group.id,
+            callback.from_user.id,
+        )
+    await _repaint_event_view(callback.message, uow, group)
+
+
+async def _repaint_event_view(message: Message, uow: UnitOfWork, group: Group) -> None:
+    """Repaint the tapped status message to the current event state so its
+    buttons always match reality (a stale Pause after a close would mislead)."""
+    text, keyboard = await _info_view(uow, group)
+    try:
+        await message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest:
+        # "message is not modified" — e.g. a double-tap on an already-handled state.
+        logger.debug("event view repaint skipped (not modified)")
