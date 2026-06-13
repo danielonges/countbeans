@@ -13,7 +13,7 @@ COMMAND_REFERENCE = (
     "(/add works too; send it bare for a guided, button-based flow)\n"
     "• /balance [all] — your net position, or every member's with /balance all\n"
     "• /settleup @user [amount] — record a payment; omit amount to settle in full\n"
-    "• /void — undo your most recent expense\n"
+    "• /void — undo your most recent expense (asks before voiding)\n"
     "• /statements [all] — your transactions, or the whole group's with /statements all\n"
     "• /event … — track a trip or dinner as its own scope (new/pause/resume/close/add/remove)\n"
     "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
@@ -30,16 +30,18 @@ GROUP_WELCOME = (
     "Everyone: run /join to be added to this group's ledger."
 )
 
-# /help — the on-demand command reference. The payoff line is the tip: every
-# command already shows its own detailed usage when sent with no arguments, so
-# /help just surfaces that rather than duplicating each command's grammar.
+# /help — the on-demand command reference. The payoff line is the tip: a bare
+# command is always safe to try (it shows status/usage or opens a guided flow,
+# and never writes without asking), so /help just surfaces that rather than
+# duplicating each command's grammar.
 GROUP_HELP = (
     "🫘 countbeans — I track and split shared expenses for this group.\n"
     "\n"
     f"{COMMAND_REFERENCE}\n"
     "\n"
-    "Tip: send any command with no arguments to see exactly how it works "
-    "(e.g. just /addexpense or /settleup).\n"
+    "Tip: every command is safe to send with no arguments — it shows its "
+    "status or usage instead of acting (/addexpense opens a guided flow; "
+    "/void previews and asks first).\n"
     "New here? Run /join to be added to the ledger."
 )
 

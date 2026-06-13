@@ -1,8 +1,9 @@
-"""Integration tests for the void_last_expense service function.
+"""Integration tests for the void services (preview_last_expense + void_expense_by_id).
 
-Exercises the SQL/outcome boundary directly (no aiogram): scope selection,
-the owner/creator/admin permission rule, and that a voided row drops out of the
-derived balances. Each test rolls back via the session fixture.
+Exercises the SQL/outcome boundary directly (no aiogram): scope selection at
+preview, the owner/creator/admin permission rule, the by-id pinning (group
+mismatch, already-voided), and that a voided row drops out of the derived
+balances. Each test rolls back via the session fixture.
 """
 
 import uuid_utils.compat as uuid_utils  # .compat yields stdlib uuid.UUID instances
@@ -18,7 +19,7 @@ from countbeans.services.repositories import (
     GroupRepository,
     UserRepository,
 )
-from countbeans.services.void_expense import void_last_expense
+from countbeans.services.void_expense import preview_last_expense, void_expense_by_id
 
 
 class _SessionUoW:
@@ -36,8 +37,10 @@ def _make_user(**kw: object) -> User:
     return User(id=uuid_utils.uuid7(), **kw)
 
 
-def _make_group() -> Group:
-    return Group(id=uuid_utils.uuid7(), telegram_chat_id=1, default_currency="SGD")
+def _make_group(telegram_chat_id: int = 1) -> Group:
+    return Group(
+        id=uuid_utils.uuid7(), telegram_chat_id=telegram_chat_id, default_currency="SGD"
+    )
 
 
 async def _seed(session: AsyncSession) -> tuple[Group, User, User]:
@@ -82,7 +85,9 @@ async def _add(
     return expense
 
 
-async def test_void_marks_row_and_clears_balance(session: AsyncSession) -> None:
+async def test_preview_then_void_marks_row_and_clears_balance(
+    session: AsyncSession,
+) -> None:
     group, alice, bob = await _seed(session)
     # alice fronts SGD 10; bob holds the whole share → bob owes alice SGD 10.
     expense = await _add(session, group, alice, amount_cents=1000)
@@ -95,11 +100,22 @@ async def test_void_marks_row_and_clears_balance(session: AsyncSession) -> None:
     uow = _SessionUoW(session)
     assert await uow.balances.compute_for_group(group.id)  # there's an outstanding debt
 
-    result = await void_last_expense(
+    preview = await preview_last_expense(uow, group.id, event_id=None)  # type: ignore[arg-type]
+    assert preview is not None
+    assert preview.expense_id == expense.id
+    assert preview.amount_cents == 1000
+    assert preview.description == "dinner"
+    # The preview is a pure read — nothing voided yet.
+    fresh = (
+        await session.execute(select(Expense).where(Expense.id == expense.id))
+    ).scalar_one()
+    assert fresh.voided_at is None
+
+    result = await void_expense_by_id(
         uow,  # type: ignore[arg-type]
         group.id,
         alice.id,
-        event_id=None,
+        preview.expense_id,
         allow_any=False,
     )
 
@@ -115,19 +131,11 @@ async def test_void_marks_row_and_clears_balance(session: AsyncSession) -> None:
     assert await uow.balances.compute_for_group(group.id) == {}
 
 
-async def test_void_nothing_when_scope_empty(session: AsyncSession) -> None:
-    group, alice, _ = await _seed(session)
+async def test_preview_none_when_scope_empty(session: AsyncSession) -> None:
+    group, _, _ = await _seed(session)
     uow = _SessionUoW(session)
 
-    result = await void_last_expense(
-        uow,  # type: ignore[arg-type]
-        group.id,
-        alice.id,
-        event_id=None,
-        allow_any=True,
-    )
-    assert result.outcome is VoidOutcome.NOTHING
-    assert result.expense_id is None
+    assert await preview_last_expense(uow, group.id, event_id=None) is None  # type: ignore[arg-type]
 
 
 async def test_void_forbidden_for_non_owner(session: AsyncSession) -> None:
@@ -136,11 +144,11 @@ async def test_void_forbidden_for_non_owner(session: AsyncSession) -> None:
     expense = await _add(session, group, bob)
     uow = _SessionUoW(session)
 
-    result = await void_last_expense(
+    result = await void_expense_by_id(
         uow,  # type: ignore[arg-type]
         group.id,
         alice.id,
-        event_id=None,
+        expense.id,
         allow_any=False,
     )
     assert result.outcome is VoidOutcome.FORBIDDEN
@@ -161,11 +169,11 @@ async def test_void_allowed_for_creator_not_payer(session: AsyncSession) -> None
     expense = await _add(session, group, bob, created_by=alice)
     uow = _SessionUoW(session)
 
-    result = await void_last_expense(
+    result = await void_expense_by_id(
         uow,  # type: ignore[arg-type]
         group.id,
         alice.id,
-        event_id=None,
+        expense.id,
         allow_any=False,
     )
     assert result.outcome is VoidOutcome.VOIDED
@@ -181,11 +189,11 @@ async def test_void_allow_any_overrides_ownership(session: AsyncSession) -> None
     uow = _SessionUoW(session)
 
     # alice isn't owner/creator, but allow_any (admin) lets her void.
-    result = await void_last_expense(
+    result = await void_expense_by_id(
         uow,  # type: ignore[arg-type]
         group.id,
         alice.id,
-        event_id=None,
+        expense.id,
         allow_any=True,
     )
     assert result.outcome is VoidOutcome.VOIDED
@@ -195,34 +203,80 @@ async def test_void_allow_any_overrides_ownership(session: AsyncSession) -> None
     assert fresh.voided_by == alice.id
 
 
-async def test_void_targets_most_recent_in_scope(session: AsyncSession) -> None:
+async def test_preview_targets_most_recent_in_scope(session: AsyncSession) -> None:
     group, alice, _ = await _seed(session)
     await _add(session, group, alice, amount_cents=1000, description="first")
     second = await _add(session, group, alice, amount_cents=2000, description="second")
     uow = _SessionUoW(session)
 
-    result = await void_last_expense(
-        uow,  # type: ignore[arg-type]
-        group.id,
-        alice.id,
-        event_id=None,
-        allow_any=False,
-    )
-    # The newest (by created_at, UUID7-ordered insert) is the one voided.
-    assert result.expense_id == second.id
-    assert result.description == "second"
+    preview = await preview_last_expense(uow, group.id, event_id=None)  # type: ignore[arg-type]
+    # The newest (by created_at, UUID7-ordered insert) is the one offered.
+    assert preview is not None
+    assert preview.expense_id == second.id
+    assert preview.description == "second"
 
 
-async def test_void_skips_already_voided(session: AsyncSession) -> None:
-    """The selection ignores voided rows: a second /void undoes the prior one."""
+async def test_preview_skips_already_voided(session: AsyncSession) -> None:
+    """The selection ignores voided rows: a second /void offers the prior one."""
     group, alice, _ = await _seed(session)
     first = await _add(session, group, alice, description="first")
     second = await _add(session, group, alice, description="second")
     uow = _SessionUoW(session)
 
-    r1 = await void_last_expense(uow, group.id, alice.id, event_id=None, allow_any=False)  # type: ignore[arg-type]
-    assert r1.expense_id == second.id
-    r2 = await void_last_expense(uow, group.id, alice.id, event_id=None, allow_any=False)  # type: ignore[arg-type]
-    assert r2.expense_id == first.id
-    r3 = await void_last_expense(uow, group.id, alice.id, event_id=None, allow_any=False)  # type: ignore[arg-type]
-    assert r3.outcome is VoidOutcome.NOTHING
+    p1 = await preview_last_expense(uow, group.id, event_id=None)  # type: ignore[arg-type]
+    assert p1 is not None and p1.expense_id == second.id
+    r1 = await void_expense_by_id(uow, group.id, alice.id, p1.expense_id, allow_any=False)  # type: ignore[arg-type]
+    assert r1.outcome is VoidOutcome.VOIDED
+
+    p2 = await preview_last_expense(uow, group.id, event_id=None)  # type: ignore[arg-type]
+    assert p2 is not None and p2.expense_id == first.id
+    r2 = await void_expense_by_id(uow, group.id, alice.id, p2.expense_id, allow_any=False)  # type: ignore[arg-type]
+    assert r2.outcome is VoidOutcome.VOIDED
+
+    assert await preview_last_expense(uow, group.id, event_id=None) is None  # type: ignore[arg-type]
+
+
+async def test_void_by_id_nothing_when_already_voided(session: AsyncSession) -> None:
+    """A double-confirm (or a void that landed meanwhile) is a no-op, not a crash
+    and not a second write."""
+    group, alice, _ = await _seed(session)
+    expense = await _add(session, group, alice)
+    uow = _SessionUoW(session)
+
+    r1 = await void_expense_by_id(uow, group.id, alice.id, expense.id, allow_any=False)  # type: ignore[arg-type]
+    assert r1.outcome is VoidOutcome.VOIDED
+    voided_at = (
+        await session.execute(select(Expense.voided_at).where(Expense.id == expense.id))
+    ).scalar_one()
+
+    r2 = await void_expense_by_id(uow, group.id, alice.id, expense.id, allow_any=False)  # type: ignore[arg-type]
+    assert r2.outcome is VoidOutcome.NOTHING
+    # The original stamp survives untouched.
+    fresh = (
+        await session.execute(select(Expense.voided_at).where(Expense.id == expense.id))
+    ).scalar_one()
+    assert fresh == voided_at
+
+
+async def test_void_by_id_rejects_foreign_group(session: AsyncSession) -> None:
+    """A crafted confirm carrying another group's expense id writes nothing —
+    the void is pinned to the group the button lives in."""
+    group, alice, _ = await _seed(session)
+    other = _make_group(telegram_chat_id=2)
+    session.add(other)
+    await session.flush()
+    expense = await _add(session, group, alice)
+    uow = _SessionUoW(session)
+
+    result = await void_expense_by_id(
+        uow,  # type: ignore[arg-type]
+        other.id,  # confirm arrives from the other group's chat
+        alice.id,
+        expense.id,
+        allow_any=True,
+    )
+    assert result.outcome is VoidOutcome.NOTHING
+    fresh = (
+        await session.execute(select(Expense.voided_at).where(Expense.id == expense.id))
+    ).scalar_one()
+    assert fresh is None

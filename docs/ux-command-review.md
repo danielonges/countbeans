@@ -33,17 +33,25 @@ recommends changes at the feature level only — no implementation notes.
 **Severity scale** (NN/g standard): **1** cosmetic · **2** minor ·
 **3** major (high priority) · **4** usability catastrophe (must fix).
 
+> **Implementation status is tracked in place:** items are tagged
+> ✅ **FIXED** (with date) once shipped; anything untagged is still
+> outstanding. Last updated: 2026-06-13.
+
 ---
 
 ## Executive summary — top findings, ranked
 
-1. **Bare `/void` executes a write instantly, and `/help` tells users to send
-   bare commands to explore.** The help text says *"send any command with no
-   arguments to see exactly how it works"* — a user who follows that advice
-   with `/void` silently voids the group's most recent expense. One command
-   violates the otherwise-universal "bare = safe" contract, and the
-   documentation actively steers people into it. (H4 + H5, severity 4 in
-   combination.)
+1. ✅ **FIXED 2026-06-13** — **Bare `/void` executes a write instantly, and
+   `/help` tells users to send bare commands to explore.** The help text said
+   *"send any command with no arguments to see exactly how it works"* — a user
+   who followed that advice with `/void` silently voided the group's most
+   recent expense. One command violated the otherwise-universal "bare = safe"
+   contract, and the documentation actively steered people into it. (H4 + H5,
+   severity 4 in combination.) *Fix: `/void` now previews the expense
+   (description, amount, payer, time, scope) with confirm/keep buttons bound
+   to the caller; the confirm is pinned to the previewed entry's id, so a
+   write landing in between can't redirect it, and a double-tap is a no-op.
+   The `/help` tip now truthfully promises bare commands never act unasked.*
 2. **Suggested transfers are dead text.** `/balance all` computes exactly who
    should pay whom and how much — then requires the user to hand-transcribe
    that into a `/settleup @user amount` command. This is the textbook H6
@@ -98,6 +106,10 @@ unprompted ledger mutation. **Recommendation:** adopt an explicit contract —
 section). Separately, update the `/help` tip, which is also stale for
 `/addexpense` (bare no longer shows usage; it starts the wizard — a good
 outcome, but the tip should say so).
+
+> ✅ **FIXED 2026-06-13** — `/void` now previews with a confirm step (the
+> contract holds everywhere), and the `/help` tip was rewritten to describe
+> the real, now-uniform behavior.
 
 ### T2 — Computed knowledge should be tappable, not transcribable (H6, H5, H7 · severity 3)
 
@@ -341,23 +353,27 @@ tiny. (The ON-by-default decision is settled and not re-examined here.)
 
 ## `/void`
 
-**Cost today:** 1 bare message — which *immediately* voids the most recent
-non-voided expense in the current scope. The reply does echo what was voided
-("🗑️ Voided: dinner — SGD 50.00. Balances updated.") and permissions are
-sensible (payer/recorder always; others need admin, with a refusal that
-names who *can*).
+**Cost today:** 1 bare message → preview of the target expense → 1 confirm
+tap. *(Originally: the bare message immediately voided, sight unseen — fixed
+2026-06-13.)* Permissions are sensible (payer/recorder always; others need
+admin, with a refusal that names who *can*).
 
 **Findings:**
 
-1. **(H5, sev 4 — in combination with the `/help` tip)** A bare command that
-   writes, in a product where every other bare command reads or teaches, and
-   whose own help text invites bare-command exploration (theme T1). The slip
-   is invisible until after it happens.
-2. **(H5, sev 3)** Even for intentional use, there is no preview: "the most
-   recent expense in scope" is a *guess* at message-send time. In an active
-   group, someone else's expense may have landed in between — the caller
-   voids (or, if admin, silently voids *someone else's*) entry they never
-   saw. The after-the-fact echo mitigates but doesn't prevent.
+1. ✅ **FIXED 2026-06-13** — **(H5, sev 4 — in combination with the `/help`
+   tip)** A bare command that writes, in a product where every other bare
+   command reads or teaches, and whose own help text invites bare-command
+   exploration (theme T1). The slip is invisible until after it happens.
+   *Fix: bare `/void` now shows, not does — preview + caller-bound
+   confirm/keep buttons.*
+2. ✅ **FIXED 2026-06-13** — **(H5, sev 3)** Even for intentional use, there
+   was no preview: "the most recent expense in scope" was a *guess* at
+   message-send time. In an active group, someone else's expense may have
+   landed in between — the caller voided (or, if admin, silently voided
+   *someone else's*) entry they never saw. *Fix: the preview names the entry,
+   and the confirm voids exactly the previewed expense id — a write landing
+   in between can never redirect it; a stale confirm reports "already voided
+   or gone" instead of acting.*
 3. **(H3, sev 3)** Only the most recent expense is reachable. Real mistakes
    are often discovered later — at settle-up time, reading `/statements`.
    The append-only/void model supports correcting any entry; the interface
@@ -369,12 +385,12 @@ names who *can*).
 
 **Recommendations (feature level):**
 
-- **Bare `/void` should show, not do:** display the entry it *would* void
-  (description, amount, who paid, when) with a confirm button and a cancel.
-  One extra tap converts an invisible slip into a reviewable action — this
-  is exactly the "confirmation friction on high-cost errors" budget the
-  `/addexpense` redesign spent correctly. The confirm must be tappable only
-  by the caller.
+- ✅ **FIXED 2026-06-13** — **Bare `/void` should show, not do:** display the
+  entry it *would* void (description, amount, who paid, when) with a confirm
+  button and a cancel. One extra tap converts an invisible slip into a
+  reviewable action — this is exactly the "confirmation friction on
+  high-cost errors" budget the `/addexpense` redesign spent correctly. The
+  confirm must be tappable only by the caller.
 - From that same preview, allow stepping to slightly older entries
   (the caller's own recent expenses; admins see all) so the
   discovered-later mistake has a recovery path without IDs or new syntax.
@@ -514,11 +530,14 @@ already been mentioned in expenses here — I've linked those to you").
 
 **Findings:**
 
-1. **(H10/H5, sev 3)** The `/help` tip — "send any command with no arguments
-   to see exactly how it works" — is now wrong twice: bare `/addexpense`
-   launches the wizard (better than the tip promises, but different), and
-   bare `/void` *performs a write* (theme T1). Documentation that
-   actively misleads about safety is worse than no documentation.
+1. ✅ **FIXED 2026-06-13** — **(H10/H5, sev 3)** The `/help` tip — "send any
+   command with no arguments to see exactly how it works" — was wrong twice:
+   bare `/addexpense` launches the wizard (better than the tip promised, but
+   different), and bare `/void` *performed a write* (theme T1). Documentation
+   that actively misleads about safety is worse than no documentation.
+   *Fix: the tip now reads "every command is safe to send with no arguments —
+   it shows its status or usage instead of acting", which became true the
+   moment `/void` gained its preview.*
 2. **(H8, sev 2)** The welcome message is a ten-bullet command reference
    delivered at the moment the group's task is "get set up," not "learn
    everything." The two actions that matter at that moment — members join,
@@ -554,7 +573,7 @@ already been mentioned in expenses here — I've linked those to you").
 |---|---|---|
 | `/addexpense` | Has one (baseline) | — |
 | `/settleup` | **Yes — one-screen suggestion picker** on bare invocation | Tap-to-pay buttons; typed form stays as accelerator |
-| `/void` | One-screen **preview + confirm** | Bare must show, not do; reach older entries; cover settlements |
+| `/void` | One-screen **preview + confirm** ✅ shipped 2026-06-13 | ~~Bare must show, not do~~ ✅; reach older entries; cover settlements |
 | `/event` | No | State-aware action buttons on `/event info` / bare `/event`; toggle-roster for add/remove |
 | `/balance` | No | me⇄all pivot button; debtor-gated tap-to-settle on suggestions |
 | `/statements` | No | Scope label in header; entry-level void entry point |
@@ -567,8 +586,10 @@ already been mentioned in expenses here — I've linked those to you").
 
 ## Priorities
 
-1. **Fix the bare-`/void` write and the `/help` tip together** (T1). Smallest
-   change, removes the only severity-4 interaction in the product.
+1. ✅ **FIXED 2026-06-13** — **Fix the bare-`/void` write and the `/help` tip
+   together** (T1). Smallest change, removes the only severity-4 interaction
+   in the product. *Shipped: preview + caller-bound confirm/keep buttons,
+   id-pinned confirm, rewritten help tip and `/void` reference line.*
 2. **Tap-to-settle** (suggestion picker on bare `/settleup`, plus
    debtor-gated buttons under `/balance all`). Biggest friction reduction in
    the core loop, and it reuses two patterns the product already trusts.

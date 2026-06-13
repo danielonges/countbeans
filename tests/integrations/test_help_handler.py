@@ -17,8 +17,9 @@ async def test_help_in_group_lists_commands_and_the_tip(dispatcher) -> None:
     # Renders the single command reference (so /void and /event are present too).
     assert COMMAND_REFERENCE in reply
     assert "/addexpense" in reply and "/void" in reply and "/event" in reply
-    # The payoff line: every command self-documents when sent bare.
+    # The payoff line: a bare command is always safe — it never writes unasked.
     assert "no arguments" in reply
+    assert "safe" in reply
 
 
 async def test_help_with_botname_suffix_still_routes(dispatcher) -> None:

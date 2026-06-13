@@ -1,6 +1,7 @@
 """Outbound result DTOs — returned from the service core after a mutating operation."""
 
 import uuid
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -42,6 +43,23 @@ class ExpenseCreatedResult(BaseModel):
     currency: str
     description: str | None
     shares: dict[uuid.UUID, int]
+    event_id: uuid.UUID | None
+
+
+class VoidPreview(BaseModel):
+    """The expense a confirmed /void would undo — shown to the caller before any
+    write. A pure read: the void itself only happens in `void_expense_by_id`,
+    pinned to this `expense_id`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    expense_id: uuid.UUID
+    amount_cents: int
+    currency: str
+    description: str | None
+    payer_id: uuid.UUID
+    created_by: uuid.UUID
+    created_at: datetime
     event_id: uuid.UUID | None
 
 

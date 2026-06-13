@@ -143,6 +143,12 @@ class ExpenseRepository:
         await self._session.flush()
         return expense.id
 
+    async def get(self, expense_id: uuid.UUID) -> Expense | None:
+        result = await self._session.execute(
+            select(Expense).where(Expense.id == expense_id)
+        )
+        return result.scalar_one_or_none()
+
     async def latest_active_in_scope(
         self, group_id: uuid.UUID, *, event_id: uuid.UUID | None
     ) -> Expense | None:
