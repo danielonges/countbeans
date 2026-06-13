@@ -48,7 +48,7 @@ commits); the date is omitted on individual items to keep them readable.
 | 3 | Settlements couldn't be undone | 3 | ✅ |
 | 4 | Only the most recent expense was correctable | 3 | ✅ |
 | 5 | Mode (active-event) visibility inconsistent on reads | 2–3 | ◑ |
-| 6 | `/event` recall-heavy, zero buttons | 3 | ◑ |
+| 6 | `/event` recall-heavy, zero buttons | 3 | ✅ |
 | 7 | Read commands silently swallow bad arguments | 2 | ✅ |
 
 The four headline findings (1–4) and the `/event` buttonization (6) shipped;
@@ -107,16 +107,16 @@ onboarding/wording polish. Details per command below.
    **Still open:** the `/balance`↔`/statements` selector mismatch and the
    unrecognized-argument notes (finding 7) are a separate sweep.
 
-6. ◑ **`/event` is the most recall-heavy surface left** — eight text
+6. ✅ **`/event` is the most recall-heavy surface left** — eight text
    subcommands, admin semantics, a pause-vs-close model users predictably trip
    on, and zero buttons even on replies that describe exactly which actions are
    available next. (H6 + H5, sev 3.)
    **Fixed:** `/event info` and bare `/event` now carry the legal transitions
-   as buttons (Pause/Close while active, Resume/Close while paused) —
+   as buttons (Pause/Close while active, Resume/Close while paused) plus a
+   "✏️ Edit roster" entry into a paged tap-to-toggle roster editor — all
    admin-gated at tap, announced to the chat, stale-safe. Removing an unsettled
    member warns; tap-mentioned members can be removed by tap (the
    unremovable-member edge is gone).
-   **Still open:** the toggle-roster editor.
 
 7. ✅ **Read commands silently swallow bad arguments.** `/balance al` (typo)
    showed your *personal* balance with no hint that the argument was ignored —
@@ -497,8 +497,9 @@ confusion arises.
   and unconditional.
   **Fixed:** removal now appends a non-blocking warning naming the unsettled
   amounts — their ledger entries survive and still count.
-- ☐ **(H6, sev 2)** Editing a roster by typing one handle per message is the
+- ✅ **(H6, sev 2)** Editing a roster by typing one handle per message was the
   exact task the `/addexpense` wizard already solved with a paged toggle roster.
+  **Fixed:** "✏️ Edit roster" on the status views opens that toggle editor.
 - ✅ **(H10, sev 1)** After `/event close`, a user who wanted the event back
   discovered reopening isn't supported only by trying syntax that failed into
   the generic usage block. **Fixed:** the close confirmation now says "Closed
@@ -511,10 +512,9 @@ confusion arises.
   admins (Pause/Close while active; Resume/Close while paused), with the existing
   admin gate deciding tappability. Removes most of the subcommand recall at zero
   added steps, and turns the paused-event trap into a visible, one-tap recovery.
-- ☐ Roster editing should offer the toggle-roster pattern from the `/addexpense`
-  wizard (tap members in/out), reachable from `/event info`. Typed add/remove
-  stays as the accelerator. *(The unremovable-member asymmetry this would have
-  fixed was closed directly — `/event remove` now accepts tapped mentions.)*
+- ✅ Roster editing offers the toggle-roster pattern from the `/addexpense`
+  wizard (tap members in/out), reachable from `/event info` via "✏️ Edit
+  roster". Typed add/remove stays as the accelerator.
 - ✅ Add the non-blocking warning when removing a roster member with outstanding
   balances in the event.
 - ☐ Event creation can stay typed (a name is keyboard-natural); the only guided
@@ -628,7 +628,7 @@ already been mentioned in expenses here — I've linked those to you").
 | `/addexpense` | Has one (baseline) | — |
 | `/settleup` | One-screen picker | ✅ tap-to-pay shipped; typed form stays as accelerator |
 | `/void` | One-screen preview + confirm | ✅ shipped (preview, browse, settlements) |
-| `/event` | No (buttonize status) | ✅ action buttons shipped; ☐ toggle-roster editor |
+| `/event` | No (buttonize status) | ✅ action buttons + toggle-roster editor shipped |
 | `/balance` | No | ✅ tap-to-settle + me⇄all pivot shipped |
 | `/statements` | No | ☐ scope label in header; ☐ void-from-statement entry point |
 | `/group` | No | ☐ active-event line |
@@ -652,15 +652,14 @@ already been mentioned in expenses here — I've linked those to you").
    `/void` preview. Shipped: settlement voiding (schema + derivation + struck-out
    statements) and ⬅ Older / Newer ➡ stepping through the last 10 entries.
    **Open:** a void entry point directly from `/statements` pages.
-4. ◑ **Buttonize `/event` status replies + toggle-roster editing.** Shipped:
+4. ✅ **Buttonize `/event` status replies + toggle-roster editing.** Shipped:
    Pause/Resume/Close buttons (admin-gated at tap, chat-announced, stale-safe),
-   tapped-mention removal, and the unsettled-removal warning. **Open:** the
-   toggle-roster editor.
-5. ☐ **Scope labeling sweep** (`/statements` header, `/group` active-event line)
-   and the unrecognized-argument notes on read commands.
+   tapped-mention removal, the unsettled-removal warning, and a paged
+   tap-to-toggle roster editor ("✏️ Edit roster").
+5. ✅ **Scope labeling sweep** (`/statements` per-entry scope tags, `/group`
+   active-event line) and the unrecognized-argument notes on read commands.
 6. ✅ **Onboarding polish** (welcome restructure + "✋ Count me in" join button)
    and plain-language wording for simplified/raw.
 
-Priorities 1–2, 5, and 6 are complete; 3–4 are done except for two follow-ups —
-a void entry point directly from `/statements`, and the `/event` toggle-roster
-editor.
+Priorities 1–2 and 4–6 are complete; 3 is done except for one follow-up —
+a void entry point directly from `/statements`.

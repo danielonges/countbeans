@@ -20,6 +20,7 @@ Scope is durable, shared group state (`groups.active_event_id`), not aiogram FSM
 """
 
 import logging
+import math
 import re
 import uuid
 
@@ -454,18 +455,70 @@ async def _reply_with_roster(
 
 
 def _event_keyboard(is_active: bool) -> InlineKeyboardMarkup:
-    """The open event's legal transitions as buttons. Shown to everyone (the
-    callback re-checks the admin gate at tap and alerts non-admins), so the
-    state machine is visible — no recalling which subcommand fits which state."""
-    row = [
-        (
-            InlineKeyboardButton(text="⏸ Pause", callback_data="ev:pause")
-            if is_active
-            else InlineKeyboardButton(text="▶️ Resume", callback_data="ev:resume")
-        ),
-        InlineKeyboardButton(text="✅ Close", callback_data="ev:close"),
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=[row])
+    """The open event's legal transitions as buttons, plus a roster editor entry.
+    Shown to everyone (the callbacks re-check the admin gate at tap and alert
+    non-admins), so the state machine is visible — no recalling which subcommand
+    fits which state."""
+    transition = (
+        InlineKeyboardButton(text="⏸ Pause", callback_data="ev:pause")
+        if is_active
+        else InlineKeyboardButton(text="▶️ Resume", callback_data="ev:resume")
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                transition,
+                InlineKeyboardButton(text="✅ Close", callback_data="ev:close"),
+            ],
+            [InlineKeyboardButton(text="✏️ Edit roster", callback_data="er:open")],
+        ]
+    )
+
+
+_ROSTER_PAGE_SIZE = 8
+
+
+async def _roster_editor_view(
+    uow: UnitOfWork, group: Group, page: int
+) -> tuple[str, InlineKeyboardMarkup] | None:
+    """The tap-to-toggle roster editor: every known group member with a ✅/⬜
+    marker for on/off the event roster, paged 8 at a time — the same pattern the
+    /addexpense wizard uses, instead of typing one @handle per message. None when
+    no event is open."""
+    event = await uow.events.get_open(group.id)
+    if event is None:
+        return None
+    members = await uow.group_members.list_members(group.id)
+    roster_ids = {m.user_id for m in await uow.events.list_members(event.id)}
+
+    pages = max(1, math.ceil(len(members) / _ROSTER_PAGE_SIZE))
+    page = max(0, min(page, pages - 1))
+    start = page * _ROSTER_PAGE_SIZE
+
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx in range(start, min(start + _ROSTER_PAGE_SIZE, len(members))):
+        m = members[idx]
+        mark = "✅" if m.user_id in roster_ids else "⬜"
+        name = display_name(m.username, m.first_name)
+        if m.is_pending:
+            name += " ⏳"
+        rows.append(
+            [InlineKeyboardButton(text=f"{mark} {name}", callback_data=f"er:t:{idx}")]
+        )
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀", callback_data=f"er:p:{page - 1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(text="▶", callback_data=f"er:p:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="✅ Done", callback_data="er:done")])
+
+    text = (
+        f'Edit "{event.name}" roster — tap a name to add or remove it.\n'
+        f"On the roster: {len(roster_ids)} of {len(members)} known member(s)."
+    )
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _info_view(
@@ -635,3 +688,106 @@ async def _repaint_event_view(message: Message, uow: UnitOfWork, group: Group) -
     except TelegramBadRequest:
         # "message is not modified" — e.g. a double-tap on an already-handled state.
         logger.debug("event view repaint skipped (not modified)")
+
+
+@router.callback_query(F.data.startswith("er:"))
+async def on_roster_edit(callback: CallbackQuery, uow: UnitOfWork, bot: Bot) -> None:
+    """The roster editor: `er:open` opens it, `er:t:<idx>` toggles a member on/off
+    the roster, `er:p:<page>` pages, `er:done` returns to /event info. Admin-gated
+    at tap (same rule as the typed roster edits), and every action repaints from
+    the current DB state so a stale index/page can't corrupt anything."""
+    parts = (callback.data or "").split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    chat = callback.message.chat
+
+    if not await is_admin(bot, chat.id, callback.from_user.id):
+        await callback.answer(
+            "Only group admins can edit the roster. Anyone can view it with "
+            "/event info.",
+            show_alert=True,
+        )
+        return
+
+    group = await uow.groups.upsert(
+        telegram_chat_id=chat.id, group_name=getattr(chat, "title", None)
+    )
+
+    if action == "done":
+        await _repaint_event_view(callback.message, uow, group)
+        await callback.answer("Roster saved.")
+        return
+
+    if action == "open":
+        await _repaint_roster_editor(callback, uow, group, page=0)
+        return
+
+    if action == "p" and len(parts) == 3:
+        try:
+            page = int(parts[2])
+        except ValueError:
+            await callback.answer()
+            return
+        await _repaint_roster_editor(callback, uow, group, page=page)
+        return
+
+    if action == "t" and len(parts) == 3:
+        try:
+            idx = int(parts[2])
+        except ValueError:
+            await callback.answer()
+            return
+        event = await uow.events.get_open(group.id)
+        if event is None:
+            await _repaint_event_view(callback.message, uow, group)
+            await callback.answer("No open event any more.")
+            return
+        members = await uow.group_members.list_members(group.id)
+        if not 0 <= idx < len(members):
+            await callback.answer()
+            return
+        member = members[idx]
+        on_roster = await uow.events.list_members(event.id)
+        is_on = any(m.user_id == member.user_id for m in on_roster)
+        await edit_event_roster(
+            uow,
+            EditEventRosterCommand(
+                event_id=event.id,
+                user_id=member.user_id,
+                action="remove" if is_on else "add",
+            ),
+        )
+        label = display_name(member.username, member.first_name)
+        toast = f"Removed {label}" if is_on else f"Added {label}"
+        await _repaint_roster_editor(
+            callback, uow, group, page=idx // _ROSTER_PAGE_SIZE, toast=toast
+        )
+        return
+
+    await callback.answer()
+
+
+async def _repaint_roster_editor(
+    callback: CallbackQuery,
+    uow: UnitOfWork,
+    group: Group,
+    *,
+    page: int,
+    toast: str | None = None,
+) -> None:
+    """Render the roster editor at one page and edit the tapped message into it.
+    Falls back to the /event info view if the event was closed meanwhile."""
+    assert isinstance(callback.message, Message)
+    view = await _roster_editor_view(uow, group, page)
+    if view is None:
+        await _repaint_event_view(callback.message, uow, group)
+        await callback.answer("No open event any more.")
+        return
+    text, keyboard = view
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest:
+        logger.debug("roster editor repaint skipped (not modified)")
+    await callback.answer(toast) if toast else await callback.answer()

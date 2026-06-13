@@ -362,7 +362,7 @@ async def test_event_info_carries_state_buttons(
     await feed(
         dispatcher, bot, make_message("/event info", from_id=1001), session=session
     )
-    assert set(_kb_data(bot)) == {"ev:pause", "ev:close"}
+    assert set(_kb_data(bot)) == {"ev:pause", "ev:close", "er:open"}
 
     await feed(
         dispatcher, bot, make_message("/event pause", from_id=1001), session=session
@@ -370,11 +370,11 @@ async def test_event_info_carries_state_buttons(
     await feed(
         dispatcher, bot, make_message("/event info", from_id=1001), session=session
     )
-    assert set(_kb_data(bot)) == {"ev:resume", "ev:close"}
+    assert set(_kb_data(bot)) == {"ev:resume", "ev:close", "er:open"}
 
     # Bare /event (the usage + status view) carries the same buttons.
     await feed(dispatcher, bot, make_message("/event", from_id=1001), session=session)
-    assert set(_kb_data(bot)) == {"ev:resume", "ev:close"}
+    assert set(_kb_data(bot)) == {"ev:resume", "ev:close", "er:open"}
 
 
 async def test_event_buttons_pause_resume_close(
@@ -528,6 +528,107 @@ async def test_event_remove_by_text_mention(dispatcher, session: AsyncSession) -
     assert "Removed Carol" in (bot.last_reply or "")
     roster = await EventRepository(session).list_members(ev.event_id)
     assert not any(m.first_name == "Carol" for m in roster)
+
+
+def _editor_buttons(bot: MockedBot) -> list[tuple[str, str]]:
+    """(label, callback_data) on the most recent *edited* message (the editor is
+    painted via edit_text from the er:open callback)."""
+    markup = bot.edits[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup), "edit carries no keyboard"
+    return [
+        (b.text, b.callback_data or "") for row in markup.inline_keyboard for b in row
+    ]
+
+
+async def test_event_info_offers_roster_editor(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=True)
+    await feed(
+        dispatcher, bot, make_message("/event info", from_id=1001), session=session
+    )
+    assert "er:open" in _kb_data(bot)
+
+
+async def test_roster_editor_toggles_membership(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Open the editor, tap a member on then off the roster — each tap writes and
+    repaints, ending back at /event info via Done."""
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    repo = EventRepository(session)
+    bot = MockedBot(caller_is_admin=True)
+
+    # Open the editor — bob is off the roster (only the creator is seeded on).
+    await feed_callback(
+        dispatcher, bot, make_callback("er:open", from_id=1001), session=session
+    )
+    buttons = _editor_buttons(bot)
+    bob_toggle = next(d for t, d in buttons if "@bob" in t)
+    assert next(t for t, d in buttons if "@bob" in t).startswith("⬜")
+    assert any(d == "er:done" for _, d in buttons)
+
+    # Tap bob → added to the roster.
+    await feed_callback(
+        dispatcher, bot, make_callback(bob_toggle, from_id=1001), session=session
+    )
+    roster = await repo.list_members(ev.event_id)
+    assert any(m.username == "bob" for m in roster)
+    answer = bot.last_answer
+    assert answer is not None and "Added @bob" in (answer.text or "")
+    # The repaint now shows bob checked.
+    assert next(t for t, d in _editor_buttons(bot) if "@bob" in t).startswith("✅")
+
+    # Tap bob again → removed.
+    await feed_callback(
+        dispatcher, bot, make_callback(bob_toggle, from_id=1001), session=session
+    )
+    roster = await repo.list_members(ev.event_id)
+    assert not any(m.username == "bob" for m in roster)
+    answer = bot.last_answer
+    assert answer is not None and "Removed @bob" in (answer.text or "")
+
+    # Done returns to the info view.
+    await feed_callback(
+        dispatcher, bot, make_callback("er:done", from_id=1001), session=session
+    )
+    assert 'Event: "Trip"' in (bot.last_edit or "")
+
+
+async def test_roster_editor_refused_for_non_admin(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    creator = await seed_member(
+        session, group, telegram_user_id=1001, username="creator"
+    )
+    await seed_member(session, group, telegram_user_id=2002, username="bob")
+    ev = await seed_event(session, group, creator=creator, name="Trip")
+    bot = MockedBot(caller_is_admin=False)
+
+    await feed_callback(
+        dispatcher, bot, make_callback("er:open", from_id=2002), session=session
+    )
+    answer = bot.last_answer
+    assert answer is not None and answer.show_alert
+    assert "admins" in (answer.text or "").lower()
+    assert not bot.edits  # nothing rendered
+    # And a crafted toggle from a non-admin writes nothing.
+    await feed_callback(
+        dispatcher, bot, make_callback("er:t:0", from_id=2002), session=session
+    )
+    roster = await EventRepository(session).list_members(ev.event_id)
+    assert {m.username for m in roster} == {"creator"}  # unchanged
 
 
 async def test_event_remove_all_refused(dispatcher, session: AsyncSession) -> None:
