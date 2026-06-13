@@ -254,9 +254,9 @@ direction in plain words ("you owe" / "you're owed").
   highest-value computation rendered as inert text (theme T2).
   **Fixed:** both `/balance` views now carry a debtor-gated tap-to-settle button
   per transfer, and the view repaints after a payment lands.
-- ☐ **(H2, sev 1)** "To settle up (simplified)" / "(raw)" is system vocabulary.
-  "Raw" means nothing to a non-technical user; the distinction that matters to
-  them is "fewest payments" vs. "exact pairwise debts."
+- ✅ **(H2, sev 1)** "To settle up (simplified)" / "(raw)" was system
+  vocabulary. **Fixed:** the heading now reads "(fewest payments)" /
+  "(exact pairwise debts)".
 - ✅ **(H9, sev 2)** Unrecognized arguments were silently ignored (theme T4).
   **Fixed:** a typo now answers with the personal view plus an "I didn't
   recognize …" note.
@@ -273,7 +273,7 @@ direction in plain words ("you owe" / "you're owed").
   "Pay @alice SGD 5.00" button, tappable only by the named debtor, recording
   the settlement with a confirmation reply. Collapses read-suggestion → settle
   from two commands plus transcription into one tap.
-- ☐ Replace "simplified"/"raw" with plain words; keep the toggle's behavior
+- ✅ Replace "simplified"/"raw" with plain words; keep the toggle's behavior
   untouched.
 - ✅ Accept `me` for symmetry, and add the gentle unrecognized-argument note.
 
@@ -393,17 +393,16 @@ clear refusal. Idempotent calls answer "already ON/OFF."
 
 **Findings:**
 
-- ☐ **(H2, sev 1)** "Debt simplification" is named but never explained at the
-  point of use. The toggle reply ("Debt simplification is now OFF.") doesn't say
-  what just changed for the reader of `/balance all`.
-- ☐ **(H1, sev 1)** The state-change reply could show its effect ("suggested
-  transfers will now show every pairwise debt") so the admin can confirm they
-  got what they intended without running `/balance all` to check.
+- ✅ **(H2, sev 1)** "Debt simplification" was named but never explained at the
+  point of use. **Fixed:** every reply now appends the effect.
+- ✅ **(H1, sev 1)** The state-change reply now shows its effect, so the admin
+  can confirm intent without running `/balance all`.
 
-**Recommendations:** ☐ append one plain-language clause to the read and toggle
-replies explaining the visible effect (fewer payments vs. exact pairwise debts;
-balances never change). Nothing else — the command is appropriately tiny. (The
-ON-by-default decision is settled and not re-examined here.)
+**Recommendations:** ✅ append one plain-language clause to the read and toggle
+replies explaining the visible effect (fewest payments vs. exact pairwise debts;
+"your balances are the same either way"). Nothing else — the command is
+appropriately tiny. (The ON-by-default decision is settled and not re-examined
+here.)
 
 **Wizard verdict:** **no.** Two states, one argument, clear refusals.
 
@@ -632,7 +631,7 @@ already been mentioned in expenses here — I've linked those to you").
 | `/balance` | No | ✅ tap-to-settle shipped; ☐ me⇄all pivot button |
 | `/statements` | No | ☐ scope label in header; ☐ void-from-statement entry point |
 | `/group` | No | ☐ active-event line |
-| `/simplify` | No | ☐ one explanatory clause in replies |
+| `/simplify` | No | ✅ explanatory clause in replies |
 | `/currency` | No | — |
 | `/start` `/join` `/help` | No | ✅ truthful help tip; ☐ join button; ☐ shorter welcome |
 

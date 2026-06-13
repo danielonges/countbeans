@@ -66,6 +66,9 @@ async def test_balance_all_lists_members_and_transfer(
     assert "Group balances" in reply
     assert "@bob" in reply and "@caller" in reply
     assert "→" in reply  # a suggested transfer is shown
+    # Plain words, not the system vocabulary "simplified"/"raw" (default is ON).
+    assert "fewest payments" in reply
+    assert "simplified" not in reply and "(raw)" not in reply
 
 
 def _pay_buttons(bot: MockedBot) -> list[tuple[str, str]]:

@@ -24,6 +24,16 @@ def _state(on: bool) -> str:
     return "ON" if on else "OFF"
 
 
+def _effect(on: bool) -> str:
+    """What the setting actually does to /balance all — the name alone
+    ("debt simplification") explains nothing at the point of use."""
+    return (
+        "/balance all suggests the fewest payments that clear everyone"
+        if on
+        else "/balance all lists every pairwise debt instead"
+    )
+
+
 @router.message(Command("simplify"))
 async def cmd_simplify(
     message: Message, command: CommandObject, bot: Bot, uow: UnitOfWork
@@ -41,8 +51,10 @@ async def cmd_simplify(
 
     # No argument → report the current state (any member may read).
     if arg is None:
+        on = group.simplify_debts
         await message.reply(
-            f"Debt simplification is currently {_state(group.simplify_debts)}."
+            f"Debt simplification is currently {_state(on)} — {_effect(on)} "
+            "(your balances are the same either way)."
         )
         return
 
@@ -66,7 +78,9 @@ async def cmd_simplify(
         return
 
     await uow.groups.set_simplify_debts(group.id, new_value)
-    await message.reply(f"Debt simplification is now {_state(new_value)}.")
+    await message.reply(
+        f"Debt simplification is now {_state(new_value)} — {_effect(new_value)}."
+    )
     logger.info(
         "simplify_debts set to %s for group_id=%s by user=%s",
         new_value,

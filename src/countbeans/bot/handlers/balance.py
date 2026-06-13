@@ -35,6 +35,13 @@ def _fmt(cents: int, currency: str) -> str:
     return f"{sign}{currency} {abs_cents // 100}.{abs_cents % 100:02d}"
 
 
+def _transfer_heading(simplify_debts: bool) -> str:
+    """Plain words for the suggested-transfer set, instead of the system
+    vocabulary "simplified"/"raw" — "raw" means nothing to a non-technical user.
+    The distinction that matters to them is fewest payments vs. every debt."""
+    return "fewest payments" if simplify_debts else "exact pairwise debts"
+
+
 async def render_group_balances(
     uow: UnitOfWork, group: Group, active_event: Event | None
 ) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -69,8 +76,9 @@ async def render_group_balances(
 
     keyboard = None
     if summary.suggested_transfers:
-        heading = "simplified" if group.simplify_debts else "raw"
-        lines.append(f"\nSuggested transfers ({heading}):")
+        lines.append(
+            f"\nSuggested transfers ({_transfer_heading(group.simplify_debts)}):"
+        )
         for t in summary.suggested_transfers:
             lines.append(
                 f"  {display_by_id[t.from_user_id]} → "
@@ -122,9 +130,8 @@ async def render_personal_balance(
     owed_to_me = [t for t in summary.suggested_transfers if t.to_user_id == viewer_id]
     i_owe = [t for t in summary.suggested_transfers if t.from_user_id == viewer_id]
 
-    heading = "simplified" if group.simplify_debts else "raw"
     if owed_to_me or i_owe:
-        lines.append(f"\nTo settle up ({heading}):")
+        lines.append(f"\nTo settle up ({_transfer_heading(group.simplify_debts)}):")
     for t in owed_to_me:
         lines.append(
             f"  {display_by_id[t.from_user_id]} pays you {format_money(t.amount_cents, t.currency)}"
