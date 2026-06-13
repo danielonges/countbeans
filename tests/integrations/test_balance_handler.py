@@ -71,12 +71,21 @@ async def test_balance_all_lists_members_and_transfer(
     assert "simplified" not in reply and "(raw)" not in reply
 
 
-def _pay_buttons(bot: MockedBot) -> list[tuple[str, str]]:
+def _all_buttons(bot: MockedBot) -> list[tuple[str, str]]:
     markup = bot.sent[-1].reply_markup
     assert isinstance(markup, InlineKeyboardMarkup), "reply carries no keyboard"
     return [
         (b.text, b.callback_data or "") for row in markup.inline_keyboard for b in row
     ]
+
+
+def _pay_buttons(bot: MockedBot) -> list[tuple[str, str]]:
+    """Only the tap-to-settle buttons (every view also carries a me⇄all pivot)."""
+    return [(t, d) for t, d in _all_buttons(bot) if d.startswith("st:p:")]
+
+
+def _pivot_data(bot: MockedBot) -> str | None:
+    return next((d for _, d in _all_buttons(bot) if d.startswith("bal:")), None)
 
 
 async def test_balance_all_transfer_button_settles(
@@ -150,7 +159,61 @@ async def test_creditor_personal_balance_has_no_pay_button(
     )
 
     assert "you're owed" in (bot.last_reply or "")
-    assert bot.sent[-1].reply_markup is None
+    assert _pay_buttons(bot) == []  # nothing for bob to pay
+    assert _pivot_data(bot) == "bal:all"  # but the pivot to everyone is still there
+
+
+async def test_balance_pivot_flips_views_in_place(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Personal view carries '👥 Everyone's balances'; tapping it repaints to the
+    group view in place, which carries '🙋 Just mine' to flip back."""
+    await _seed_caller_owes_bob(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/balance", from_id=1001, username="caller"),
+        session=session,
+    )
+    assert _pivot_data(bot) == "bal:all"  # personal view → pivot to everyone
+
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback("bal:all", from_id=1001, username="caller"),
+        session=session,
+    )
+    edited = bot.last_edit or ""
+    assert "Group balances" in edited
+    # The repainted group view carries the reverse pivot.
+    markup = bot.edits[-1].reply_markup
+    data = [b.callback_data for row in markup.inline_keyboard for b in row]  # type: ignore[union-attr]
+    assert "bal:me" in data
+
+
+async def test_balance_pivot_me_shows_tappers_own(
+    dispatcher, session: AsyncSession
+) -> None:
+    """'🙋 Just mine' shows the *tapper's* balance, not the original caller's —
+    and reveals nothing /balance all wouldn't."""
+    await _seed_caller_owes_bob(session)
+    bot = MockedBot()
+    # caller opens the group view…
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/balance all", from_id=1001, username="caller"),
+        session=session,
+    )
+    # …bob taps "Just mine" → bob's own personal view (he's owed SGD 5).
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback("bal:me", from_id=2002, username="bob"),
+        session=session,
+    )
+    assert "you're owed" in (bot.last_edit or "")
 
 
 async def test_balance_me_is_personal_without_note(

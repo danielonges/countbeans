@@ -247,9 +247,10 @@ direction in plain words ("you owe" / "you're owed").
 
 **Findings:**
 
-- ☐ **(H6/H7, sev 2)** Pivoting between "my balance" and "everyone's" means
-  retyping the command with a remembered selector. The most common follow-up to
-  one view is the other.
+- ✅ **(H6/H7, sev 2)** Pivoting between "my balance" and "everyone's" meant
+  retyping the command with a remembered selector. **Fixed:** each view carries
+  a one-tap pivot ("👥 Everyone's balances" / "🙋 Just mine") that repaints in
+  place.
 - ✅ **(H6/H5, sev 3)** The suggested-transfers block was the product's
   highest-value computation rendered as inert text (theme T2).
   **Fixed:** both `/balance` views now carry a debtor-gated tap-to-settle button
@@ -266,9 +267,10 @@ direction in plain words ("you owe" / "you're owed").
 
 **Recommendations (feature level):**
 
-- ☐ Add a single pivot button to each view ("👥 Everyone's balances" on the
+- ✅ Add a single pivot button to each view ("👥 Everyone's balances" on the
   personal view, "🙋 Just mine" on the group view) that edits the message in
-  place — same pattern as statement pagination.
+  place — same pattern as statement pagination. *(Not owner-bound: `bal:me`
+  shows the tapper's own balance, which `/balance all` already reveals.)*
 - ✅ Where a suggested transfer involves the viewer, make it actionable: a
   "Pay @alice SGD 5.00" button, tappable only by the named debtor, recording
   the settlement with a confirmation reply. Collapses read-suggestion → settle
@@ -628,7 +630,7 @@ already been mentioned in expenses here — I've linked those to you").
 | `/settleup` | One-screen picker | ✅ tap-to-pay shipped; typed form stays as accelerator |
 | `/void` | One-screen preview + confirm | ✅ shipped (preview, browse, settlements) |
 | `/event` | No (buttonize status) | ✅ action buttons shipped; ☐ toggle-roster editor |
-| `/balance` | No | ✅ tap-to-settle shipped; ☐ me⇄all pivot button |
+| `/balance` | No | ✅ tap-to-settle + me⇄all pivot shipped |
 | `/statements` | No | ☐ scope label in header; ☐ void-from-statement entry point |
 | `/group` | No | ☐ active-event line |
 | `/simplify` | No | ✅ explanatory clause in replies |
