@@ -48,7 +48,10 @@ def _entry_lines(e: StatementEntry) -> str:
             sub += f" · split {e.participant_count}-way"
         return f"{head}\n{sub}"
     other = display_name(e.counterparty_username, e.counterparty_first_name)
-    return f"💸 {when} · {actor} → {other}: {format_money(e.amount_cents, e.currency)}"
+    head = f"💸 {when} · {actor} → {other}: {format_money(e.amount_cents, e.currency)}"
+    if e.voided:
+        head = f"❌ {head} (voided)"
+    return head
 
 
 def _render(page: StatementPage, title: str) -> str:

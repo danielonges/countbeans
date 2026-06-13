@@ -93,6 +93,34 @@ class SettlementRepository:
         )
         return result.scalar_one_or_none()
 
+    async def recent_active_in_scope(
+        self, group_id: uuid.UUID, *, event_id: uuid.UUID | None, limit: int
+    ) -> list[Settlement]:
+        """The newest non-voided settlements in one scope (newest first) — the
+        settlement half of /void's browse list. Scope rule as everywhere:
+        general (``event_id IS NULL``) or exactly one event."""
+        scope = _event_scope(Settlement.event_id, event_id)
+        result = await self._session.execute(
+            select(Settlement)
+            .where(
+                Settlement.group_id == group_id,
+                Settlement.voided_at.is_(None),
+                scope,
+            )
+            .order_by(Settlement.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def mark_voided(
+        self, settlement: Settlement, *, voided_by: uuid.UUID
+    ) -> None:
+        """Stamp the void fields on an already-fetched settlement — append-only,
+        like ExpenseRepository.mark_voided; balances exclude voided rows."""
+        settlement.voided_at = _now()
+        settlement.voided_by = voided_by
+        await self._session.flush()
+
     def _to_dto(self, row: Settlement) -> SettlementCreatedResult:
         return SettlementCreatedResult(
             settlement_id=row.id,
@@ -149,11 +177,11 @@ class ExpenseRepository:
         )
         return result.scalar_one_or_none()
 
-    async def latest_active_in_scope(
-        self, group_id: uuid.UUID, *, event_id: uuid.UUID | None
-    ) -> Expense | None:
-        """The most-recent non-voided expense in one scope (newest `created_at`
-        first), or None when the scope has nothing left to void.
+    async def recent_active_in_scope(
+        self, group_id: uuid.UUID, *, event_id: uuid.UUID | None, limit: int
+    ) -> list[Expense]:
+        """The newest non-voided expenses in one scope (newest `created_at`
+        first) — the expense half of /void's browse list.
 
         The scope is the **general** ledger (``event_id IS NULL``) when ``event_id``
         is None, else exactly that event's rows — mirroring BalanceRepository so a
@@ -164,9 +192,9 @@ class ExpenseRepository:
             select(Expense)
             .where(Expense.group_id == group_id, Expense.voided_at.is_(None), scope)
             .order_by(Expense.created_at.desc())
-            .limit(1)
+            .limit(limit)
         )
-        return result.scalar_one_or_none()
+        return list(result.scalars())
 
     async def mark_voided(self, expense: Expense, *, voided_by: uuid.UUID) -> None:
         """Stamp the void fields on an already-fetched expense. The row stays in
@@ -242,7 +270,11 @@ class BalanceRepository:
                 Settlement.currency,
                 func.sum(Settlement.amount_cents),
             )
-            .where(Settlement.group_id == group_id, set_scope)
+            .where(
+                Settlement.group_id == group_id,
+                Settlement.voided_at.is_(None),
+                set_scope,
+            )
             .group_by(Settlement.from_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
@@ -255,7 +287,11 @@ class BalanceRepository:
                 Settlement.currency,
                 func.sum(Settlement.amount_cents),
             )
-            .where(Settlement.group_id == group_id, set_scope)
+            .where(
+                Settlement.group_id == group_id,
+                Settlement.voided_at.is_(None),
+                set_scope,
+            )
             .group_by(Settlement.to_user_id, Settlement.currency)
         )
         for user_id, currency, total in rows:
@@ -357,7 +393,7 @@ class StatementRepository:
                 actor_id=s.from_user_id,
                 counterparty_id=s.to_user_id,
                 participant_count=None,
-                voided=False,
+                voided=s.voided_at is not None,
             )
             for s in settlements
         )

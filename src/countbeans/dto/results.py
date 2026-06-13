@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -47,18 +48,20 @@ class ExpenseCreatedResult(BaseModel):
 
 
 class VoidPreview(BaseModel):
-    """The expense a confirmed /void would undo — shown to the caller before any
-    write. A pure read: the void itself only happens in `void_expense_by_id`,
-    pinned to this `expense_id`."""
+    """One recent ledger entry (expense or settlement) a confirmed /void could
+    undo — shown to the caller before any write. A pure read: the void itself
+    only happens in `void_entry`, pinned to this `kind` + `entry_id`."""
 
     model_config = ConfigDict(frozen=True)
 
-    expense_id: uuid.UUID
+    kind: Literal["expense", "settlement"]
+    entry_id: uuid.UUID
     amount_cents: int
     currency: str
-    description: str | None
-    payer_id: uuid.UUID
-    created_by: uuid.UUID
+    description: str | None  # expenses only
+    actor_id: uuid.UUID  # expense payer / settlement sender
+    counterparty_id: uuid.UUID | None  # settlement recipient; None for expenses
+    created_by: uuid.UUID | None  # expense recorder; settlements store none
     created_at: datetime
     event_id: uuid.UUID | None
 
@@ -67,24 +70,26 @@ class VoidOutcome(StrEnum):
     """Why a /void did or didn't happen, so the handler can pick the reply without
     re-deriving it (and without holding any SQLAlchemy state)."""
 
-    VOIDED = "voided"  # the expense was stamped voided
-    NOTHING = "nothing"  # the scope had no active expense to void
-    FORBIDDEN = "forbidden"  # caller is neither owner/creator nor a group admin
+    VOIDED = "voided"  # the entry was stamped voided
+    NOTHING = "nothing"  # the entry is gone / already voided / another group's
+    FORBIDDEN = "forbidden"  # caller is neither a party to the entry nor an admin
 
 
-class ExpenseVoidedResult(BaseModel):
-    """Outcome of a /void. `outcome` says what happened; the expense fields are
-    populated for VOIDED (echo what was undone) and FORBIDDEN (name who *can*
-    void it via `payer_id` / `created_by`), and are None for NOTHING."""
+class EntryVoidedResult(BaseModel):
+    """Outcome of a /void confirm. `outcome` says what happened; the entry
+    fields are populated for VOIDED (echo what was undone) and FORBIDDEN (name
+    who *can* void it), and are None for NOTHING."""
 
     model_config = ConfigDict(frozen=True)
 
     outcome: VoidOutcome
-    expense_id: uuid.UUID | None = None
+    kind: Literal["expense", "settlement"] | None = None
+    entry_id: uuid.UUID | None = None
     amount_cents: int | None = None
     currency: str | None = None
     description: str | None = None
-    payer_id: uuid.UUID | None = None
+    actor_id: uuid.UUID | None = None
+    counterparty_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
     event_id: uuid.UUID | None = None
 

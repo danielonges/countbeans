@@ -19,6 +19,7 @@ from countbeans.services.events import create_event
 from countbeans.services.repositories import (
     GroupMemberRepository,
     GroupRepository,
+    SettlementRepository,
     UserRepository,
 )
 
@@ -91,6 +92,30 @@ async def seed_event(
     )
     await session.flush()
     return result
+
+
+async def seed_settlement(
+    session: AsyncSession,
+    group: Group,
+    *,
+    from_user: User,
+    to_user: User,
+    amount_cents: int,
+    currency: str = "SGD",
+    event_id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """Record a settlement directly through the repository (no suggested-transfer
+    validation — tests pair it with a seeded debt). Returns the settlement id."""
+    result = await SettlementRepository(session).add(
+        group_id=group.id,
+        event_id=event_id,
+        from_user_id=from_user.id,
+        to_user_id=to_user.id,
+        amount_cents=amount_cents,
+        currency=currency,
+    )
+    await session.flush()
+    return result.settlement_id
 
 
 async def seed_expense(

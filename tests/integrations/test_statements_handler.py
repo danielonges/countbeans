@@ -5,10 +5,14 @@ Exercises the callback path the service tests can't: the owner-binding check
 edit_text.
 """
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from countbeans.db.models import Settlement
+from countbeans.services.repositories import SettlementRepository
+
 from ._bot_harness import MockedBot, feed, feed_callback, make_callback, make_message
-from ._seed import seed_group
+from ._seed import seed_group, seed_member, seed_settlement
 
 
 async def test_statements_personal_view(dispatcher, session: AsyncSession) -> None:
@@ -44,6 +48,36 @@ async def test_statements_group_page_callback_repaints(
 
     assert "Group statement" in (bot.last_edit or "")  # repainted via edit_text
     assert bot.last_answer is not None  # the tap was acknowledged
+
+
+async def test_statements_flag_voided_settlement(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A voided settlement stays on the statement, struck out like a voided
+    expense — the statement is the audit trail."""
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    settlement_id = await seed_settlement(
+        session, group, from_user=caller, to_user=bob, amount_cents=500
+    )
+    repo = SettlementRepository(session)
+    row = (
+        await session.execute(select(Settlement).where(Settlement.id == settlement_id))
+    ).scalar_one()
+    await repo.mark_voided(row, voided_by=caller.id)
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements all", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "❌ 💸" in reply
+    assert "(voided)" in reply
 
 
 async def test_statements_other_users_page_is_rejected(

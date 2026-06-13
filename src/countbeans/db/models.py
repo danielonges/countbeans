@@ -199,6 +199,12 @@ class Settlement(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    # Mirrors Expense: a mistaken settlement is corrected by voiding (stamp, never
+    # delete), and the balance derivation filters `voided_at IS NULL`.
+    voided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
 
     __table_args__ = (
         CheckConstraint("amount_cents > 0", name="amount_positive"),

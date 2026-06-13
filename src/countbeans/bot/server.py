@@ -48,7 +48,7 @@ _COMMANDS = [
     BotCommand(
         command="settleup", description="See what you owe and settle with a tap"
     ),
-    BotCommand(command="void", description="Undo your most recent expense"),
+    BotCommand(command="void", description="Undo a recent expense or settlement"),
     BotCommand(
         command="simplify", description="View or toggle debt simplification (admin)"
     ),

@@ -62,12 +62,17 @@ recommends changes at the feature level only — no implementation notes.
    carry the same buttons under their transfer lists. Every button is bound to
    its debtor, the amount is re-derived at tap time (a stale button alerts
    instead of overpaying), and the view repaints after the payment lands.*
-3. **Settlements cannot be undone.** `/void` covers expenses only. A
-   mis-typed settlement amount or direction is permanent; the only recourse
-   is a counter-entry the user must invent themselves. (H3, severity 3.)
-4. **Only the most recent expense is correctable.** Discovering yesterday's
-   error in `/statements` leads to a dead end — there is no path from "I can
-   see the wrong entry" to "fix it." (H3 + H6, severity 3.)
+3. ✅ **FIXED 2026-06-13** — **Settlements cannot be undone.** `/void` covered
+   expenses only. A mis-typed settlement amount or direction was permanent.
+   (H3, severity 3.) *Fix: settlements now void exactly like expenses
+   (append-only stamp; balances re-derive; statements show them struck out).
+   Either party to the settlement — or an admin — may void it.*
+4. ✅ **FIXED 2026-06-13** — **Only the most recent expense is correctable.**
+   Discovering yesterday's error led to a dead end. (H3 + H6, severity 3.)
+   *Fix: the `/void` preview steps back through the last 10 entries in scope
+   (⬅ Older / Newer ➡). An entry the caller can't void still previews — naming
+   who can — so they can step on to their own. A void entry point directly
+   from `/statements` remains outstanding.*
 5. **Mode visibility is inconsistent.** Active-event mode changes what every
    write and read means, but `/statements` doesn't say which scope it's
    showing, and `/group` — the "group info" command — doesn't mention the
@@ -251,12 +256,12 @@ Voided entries are visibly struck (❌ + "(voided)").
    "📋 Your statement" is silently event-only — a user checking whether an
    old general expense was recorded will conclude it's missing. `/balance`
    already names the scope; this is the inconsistency (theme T3).
-2. **(H3/H6, sev 3)** The statement is where users *discover* mistakes —
-   and it offers no path to correct any of them. The only correction tool
-   (`/void`) reaches the single most recent expense. Seeing the error and
-   being unable to act on it is the H6 violation in reverse: the system
-   shows the object but accepts no action on it. (See `/void` for the
-   recommended fix; the entry point belongs here.)
+2. **(H3/H6, sev 3 → 2)** The statement is where users *discover* mistakes —
+   and it offers no path to correct any of them. *Largely mitigated
+   2026-06-13: `/void` now steps back through the last 10 entries (both
+   kinds), so anything recently visible in a statement is reachable without
+   IDs.* Still outstanding: acting on an entry directly from the statement
+   page itself.
 3. **(H9, sev 2)** Silent argument swallowing, as with `/balance` (theme T4).
 4. **(H1, sev 1)** Timestamps carry no timezone hint. For a travel-oriented
    product, "Jun 03 12:30" in an unstated zone occasionally misleads
@@ -309,11 +314,10 @@ member ("@bob — flag it if that's not right") — a nice accountability touch.
    usage block. Settling is also the moment of highest anxiety in an
    expense-splitting product — users double-check direction precisely
    because the syntax doesn't state it.
-3. **(H3, sev 3)** **No undo.** A settlement recorded with the wrong amount
-   or counterparty is permanent (see `/void`). For the one command where
-   users are most worried about getting it wrong, this is backwards: the
-   product spends its undo budget on expenses (low anxiety, easily re-added)
-   and none on settlements.
+3. ✅ **FIXED 2026-06-13** — **(H3, sev 3)** **No undo.** A settlement
+   recorded with the wrong amount or counterparty was permanent. *Fix:
+   settlements are voidable via `/void` like expenses — by either party or
+   an admin.*
 4. **(H9, sev 1)** The currency-mismatch error explains itself well but
    makes the user re-issue the whole command with an explicit amount; it
    could carry the corrected command in copy-paste form.
@@ -331,7 +335,7 @@ member ("@bob — flag it if that's not right") — a nice accountability touch.
 - ✅ **FIXED 2026-06-13** — The same buttons surfaced under `/balance all`
   (debtor-gated) make the read view actionable without even issuing
   `/settleup`.
-- Extend undo to settlements (see `/void`).
+- ✅ **FIXED 2026-06-13** — Extend undo to settlements (see `/void`).
 - Keep the typed forms exactly as they are for experts and admins —
   consistent with the `/addexpense` philosophy of wizard-plus-accelerator.
 
@@ -387,14 +391,16 @@ admin, with a refusal that names who *can*).
    and the confirm voids exactly the previewed expense id — a write landing
    in between can never redirect it; a stale confirm reports "already voided
    or gone" instead of acting.*
-3. **(H3, sev 3)** Only the most recent expense is reachable. Real mistakes
-   are often discovered later — at settle-up time, reading `/statements`.
-   The append-only/void model supports correcting any entry; the interface
-   exposes almost none of it.
-4. **(H3, sev 3)** Settlements are out of scope entirely — no undo exists
-   for the highest-anxiety write in the product (see `/settleup`).
-5. **(H9, sev 1)** "Nothing to void — no expenses recorded yet" is slightly
-   wrong when expenses exist but are all voided; cosmetic.
+3. ✅ **FIXED 2026-06-13** — **(H3, sev 3)** Only the most recent expense was
+   reachable. *Fix: the preview steps through the last 10 active entries in
+   scope with ⬅ Older / Newer ➡; permission is evaluated per entry, so a
+   non-owner can browse past someone else's entry to their own.*
+4. ✅ **FIXED 2026-06-13** — **(H3, sev 3)** Settlements were out of scope
+   entirely. *Fix: `/void` now browses and voids settlements too (either
+   party or an admin); voided settlements stay in `/statements`, struck out.*
+5. ✅ **FIXED 2026-06-13** — **(H9, sev 1)** "Nothing to void — no expenses
+   recorded yet" was slightly wrong when expenses exist but are all voided.
+   *Fix: the empty state now reads "no active expenses or settlements here."*
 
 **Recommendations (feature level):**
 
@@ -404,12 +410,15 @@ admin, with a refusal that names who *can*).
   reviewable action — this is exactly the "confirmation friction on
   high-cost errors" budget the `/addexpense` redesign spent correctly. The
   confirm must be tappable only by the caller.
-- From that same preview, allow stepping to slightly older entries
-  (the caller's own recent expenses; admins see all) so the
+- ✅ **FIXED 2026-06-13** — From that same preview, allow stepping to slightly
+  older entries (the caller's own recent expenses; admins see all) so the
   discovered-later mistake has a recovery path without IDs or new syntax.
-  This pairs with the `/statements` entry-point recommendation.
-- Extend voiding to settlements under the same permission model. The ledger
-  is append-only either way; this is purely an exposure question.
+  This pairs with the `/statements` entry-point recommendation (which is
+  still outstanding).
+- ✅ **FIXED 2026-06-13** — Extend voiding to settlements under the same
+  permission model (a settlement's sender or recipient stands in for
+  payer/recorder — no recorder is stored). The ledger is append-only either
+  way; this was purely an exposure question.
 - Keep a typed accelerator for the power case if desired — but the
   *default* path must preview first.
 
@@ -586,7 +595,7 @@ already been mentioned in expenses here — I've linked those to you").
 |---|---|---|
 | `/addexpense` | Has one (baseline) | — |
 | `/settleup` | **Yes — one-screen suggestion picker** ✅ shipped 2026-06-13 | ~~Tap-to-pay buttons~~ ✅; typed form stays as accelerator |
-| `/void` | One-screen **preview + confirm** ✅ shipped 2026-06-13 | ~~Bare must show, not do~~ ✅; reach older entries; cover settlements |
+| `/void` | One-screen **preview + confirm** ✅ shipped 2026-06-13 | ~~Bare must show, not do~~ ✅; ~~reach older entries~~ ✅; ~~cover settlements~~ ✅ |
 | `/event` | No | State-aware action buttons on `/event info` / bare `/event`; toggle-roster for add/remove |
 | `/balance` | No | me⇄all pivot button; debtor-gated tap-to-settle on suggestions |
 | `/statements` | No | Scope label in header; entry-level void entry point |
@@ -609,9 +618,12 @@ already been mentioned in expenses here — I've linked those to you").
    patterns the product already trusts. *Shipped: one tap records the
    payment in full, announces it to the chat, and repaints the view; stale
    buttons alert instead of writing.*
-3. **Undo coverage: settlements voidable; older entries reachable** from the
-   `/void` preview and `/statements`. Closes the H3 gap at the
-   highest-anxiety moments.
+3. ✅ **MOSTLY FIXED 2026-06-13** — **Undo coverage: settlements voidable;
+   older entries reachable** from the `/void` preview and `/statements`.
+   Closes the H3 gap at the highest-anxiety moments. *Shipped: settlement
+   voiding (schema + derivation + struck-out statements) and ⬅ Older / Newer ➡
+   stepping through the last 10 entries in the `/void` preview. Outstanding:
+   a void entry point directly from `/statements` pages.*
 4. **Buttonize `/event` status replies + toggle-roster editing.** Converts
    the most recall-heavy remaining command family; also fixes the
    unremovable-member edge.

@@ -14,7 +14,7 @@ COMMAND_REFERENCE = (
     "• /balance [all] — your net position, or every member's with /balance all\n"
     "• /settleup — see what you owe and settle with a tap "
     "(or /settleup @user [amount])\n"
-    "• /void — undo your most recent expense (asks before voiding)\n"
+    "• /void — undo a recent expense or settlement (asks before voiding)\n"
     "• /statements [all] — your transactions, or the whole group's with /statements all\n"
     "• /event … — track a trip or dinner as its own scope (new/pause/resume/close/add/remove)\n"
     "• /simplify [on|off] — view or (admins) toggle simplified settle-up suggestions\n"
