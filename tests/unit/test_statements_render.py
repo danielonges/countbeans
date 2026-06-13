@@ -68,6 +68,21 @@ def test_settlement_line_shows_direction():
     assert "@bob → @alice: SGD 10.00" in out
 
 
+def test_event_tagged_entry_carries_scope_label():
+    out = _entry_lines(_expense(event_name="Bali"))
+    assert "🏷️ Bali" in out
+
+
+def test_general_entry_has_no_scope_label():
+    assert "🏷️" not in _entry_lines(_expense())
+
+
+def test_voided_event_entry_tag_follows_voided():
+    # The tag sits after "(voided)" so it never reads as "<event> (voided)".
+    out = _entry_lines(_expense(voided=True, event_name="Bali"))
+    assert out.index("(voided)") < out.index("🏷️ Bali")
+
+
 def test_missing_username_falls_back_to_someone():
     out = _entry_lines(_expense(actor_username=None))
     assert "paid by someone" in out

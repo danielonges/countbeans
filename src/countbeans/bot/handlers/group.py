@@ -21,7 +21,8 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     if message.from_user is None:
         return
 
-    group = (await resolve_chat_context(uow, message)).group
+    ctx = await resolve_chat_context(uow, message)
+    group = ctx.group
 
     try:
         chat_count = await bot.get_chat_member_count(message.chat.id)
@@ -57,6 +58,15 @@ async def cmd_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
     lines.append(f"Currency: {info.default_currency}")
     simplify_label = "on" if info.simplify_debts else "off"
     lines.append(f"Debt simplification: {simplify_label}")
+    # Where new expenses land — the single most action-relevant piece of group
+    # state, and otherwise invisible here (active-event mode is a "mode" in the
+    # NN/g sense: identical input means different things). /event info has the rest.
+    if ctx.active_event is not None:
+        lines.append(
+            f'Active event: "{ctx.active_event.name}" — new expenses tag to it'
+        )
+    else:
+        lines.append("Active event: none — new expenses are general")
 
     # Members
     lines.append("")

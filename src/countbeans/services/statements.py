@@ -39,6 +39,13 @@ async def get_statement_page(
             ids.add(e.counterparty_id)
     labels = await uow.balances.get_display_names(ids)  # {id: (username, first_name)}
 
+    # Statements span every scope (general + all events) merged chronologically,
+    # so tag each entry with its event name — otherwise a trip expense and a
+    # general one are indistinguishable in the same list.
+    event_names = await uow.events.names_for(
+        {e.event_id for e in window if e.event_id is not None}
+    )
+
     def label(uid: uuid.UUID | None) -> tuple[str | None, str | None]:
         return labels.get(uid, (None, None)) if uid is not None else (None, None)
 
@@ -59,6 +66,9 @@ async def get_statement_page(
                 counterparty_first_name=cp_first_name,
                 participant_count=e.participant_count,
                 voided=e.voided,
+                event_name=(
+                    event_names.get(e.event_id) if e.event_id is not None else None
+                ),
             )
         )
     return StatementPage(entries=entries, page=page, page_size=page_size, total=total)

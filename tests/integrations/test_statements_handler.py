@@ -12,7 +12,13 @@ from countbeans.db.models import Settlement
 from countbeans.services.repositories import SettlementRepository
 
 from ._bot_harness import MockedBot, feed, feed_callback, make_callback, make_message
-from ._seed import seed_group, seed_member, seed_settlement
+from ._seed import (
+    seed_event,
+    seed_expense,
+    seed_group,
+    seed_member,
+    seed_settlement,
+)
 
 
 async def test_statements_personal_view(dispatcher, session: AsyncSession) -> None:
@@ -48,6 +54,41 @@ async def test_statements_group_page_callback_repaints(
 
     assert "Group statement" in (bot.last_edit or "")  # repainted via edit_text
     assert bot.last_answer is not None  # the tap was acknowledged
+
+
+async def test_statements_tags_event_scope(dispatcher, session: AsyncSession) -> None:
+    """Statements span all scopes; an event-tagged expense is labelled with the
+    event name so it's distinguishable from a general one in the same list."""
+    group = await seed_group(session)
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    event = await seed_event(session, group, creator=caller, name="Bali")
+    # One general expense and one event-tagged expense.
+    await seed_expense(
+        session, group, payer=caller, participants=[caller, bob], amount_cents=1000
+    )
+    await seed_expense(
+        session,
+        group,
+        payer=caller,
+        participants=[caller, bob],
+        amount_cents=2000,
+        event_id=event.event_id,
+        description="trip dinner",
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/statements all", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "🏷️ Bali" in reply  # the event-tagged entry carries its scope
+    # The general expense line is present but untagged (one 🏷️ total).
+    assert reply.count("🏷️") == 1
 
 
 async def test_statements_flag_voided_settlement(

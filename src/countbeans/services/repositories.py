@@ -57,6 +57,7 @@ class RawStatementEntry:
     counterparty_id: uuid.UUID | None  # settlement recipient; None for expense
     participant_count: int | None
     voided: bool
+    event_id: uuid.UUID | None  # the scope this entry is tagged to (None = general)
 
 
 class SettlementRepository:
@@ -371,6 +372,7 @@ class StatementRepository:
                 counterparty_id=None,
                 participant_count=counts.get(e.id, 0),
                 voided=e.voided_at is not None,
+                event_id=e.event_id,
             )
             for e in expenses
         ]
@@ -394,6 +396,7 @@ class StatementRepository:
                 counterparty_id=s.to_user_id,
                 participant_count=None,
                 voided=s.voided_at is not None,
+                event_id=s.event_id,
             )
             for s in settlements
         )
@@ -688,6 +691,16 @@ class EventRepository:
             select(Event).where(Event.group_id == group_id, Event.status == "open")
         )
         return result.scalar_one_or_none()
+
+    async def names_for(self, event_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Map event ids to names — lets the statement view tag each entry with
+        its scope without the bot holding ORM rows. Empty in, empty out."""
+        if not event_ids:
+            return {}
+        rows = await self._session.execute(
+            select(Event.id, Event.name).where(Event.id.in_(event_ids))
+        )
+        return {row.id: row.name for row in rows}
 
     async def set_status(
         self, event_id: uuid.UUID, status: str, closed_at: datetime | None

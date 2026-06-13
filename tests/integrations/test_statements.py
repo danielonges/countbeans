@@ -22,6 +22,7 @@ from countbeans.db.models import (
 )
 from countbeans.services.repositories import (
     BalanceRepository,
+    EventRepository,
     GroupRepository,
     StatementRepository,
     UserRepository,
@@ -35,6 +36,7 @@ class _SessionUoW:
         self.balances = BalanceRepository(session)
         self.users = UserRepository(session)
         self.groups = GroupRepository(session)
+        self.events = EventRepository(session)
 
 
 _T0 = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)

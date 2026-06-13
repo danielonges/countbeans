@@ -47,7 +47,7 @@ commits); the date is omitted on individual items to keep them readable.
 | 2 | Suggested transfers were dead text (no tap-to-settle) | 3 | ✅ |
 | 3 | Settlements couldn't be undone | 3 | ✅ |
 | 4 | Only the most recent expense was correctable | 3 | ✅ |
-| 5 | Mode (active-event) visibility inconsistent on reads | 2–3 | ☐ |
+| 5 | Mode (active-event) visibility inconsistent on reads | 2–3 | ◑ |
 | 6 | `/event` recall-heavy, zero buttons | 3 | ◑ |
 | 7 | Read commands silently swallow bad arguments | 2 | ☐ |
 
@@ -97,10 +97,15 @@ onboarding/wording polish. Details per command below.
    naming who can — so they can step on to their own.
    **Still open:** a void entry point directly from `/statements`.
 
-5. ☐ **Mode visibility is inconsistent.** Active-event mode changes what every
-   write and read means, but `/statements` doesn't say which scope it's
-   showing, and `/group` — the "group info" command — doesn't mention the
-   active event at all. (H1, sev 2–3.)
+5. ◑ **Mode visibility is inconsistent.** Active-event mode changes what every
+   write and read means, but the reads didn't signal scope. (H1, sev 2–3.)
+   **Fixed:** `/group` now states where new expenses land ("Active event:
+   …" / "none — general"), and `/statements` tags each entry with its event
+   scope (🏷️) — correcting the original review's premise, which had
+   `/statements` backwards: it is *cross-scope* (all events + general merged),
+   not event-only, so the real fix was per-entry labels, not a header rename.
+   **Still open:** the `/balance`↔`/statements` selector mismatch and the
+   unrecognized-argument notes (finding 7) are a separate sweep.
 
 6. ◑ **`/event` is the most recall-heavy surface left** — eight text
    subcommands, admin semantics, a pause-vs-close model users predictably trip
@@ -279,10 +284,12 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
 
 **Findings:**
 
-- ☐ **(H1, sev 2)** The header never names the active event. During a trip,
-  "📋 Your statement" is silently event-only — a user checking whether an old
-  general expense was recorded will conclude it's missing. `/balance` already
-  names the scope; this is the inconsistency (theme T3).
+- ✅ **(H1, sev 2)** Entries carried no scope label. `/statements` is actually
+  *cross-scope* — it merges every event plus general chronologically (the
+  original review had this backwards, claiming it was event-only) — so during
+  a trip a general expense and a trip expense sat side by side, indistinguishable.
+  **Fixed:** each entry is now tagged with its event (🏷️ <name>); general
+  entries are untagged.
 - ◑ **(H3/H6, sev 3 → 2)** The statement is where users *discover* mistakes —
   and it offers no path to correct any of them.
   **Mitigated:** `/void` now steps back through the last 10 entries (both
@@ -295,8 +302,9 @@ entries are visibly struck (❌ + "(voided)") — now for settlements too.
 
 **Recommendations (feature level):**
 
-- ☐ Name the scope in the header whenever an event is active ("📋 Your
-  statement — "Bali Trip"").
+- ✅ Surface the scope of each entry. *(Implemented as per-entry 🏷️ tags
+  rather than a header rename, since the view is cross-scope — see the finding
+  above.)*
 - ☐ Treat the statement as the entry point for corrections: from a statement
   view, a member should be able to initiate voiding one of *their* visible
   entries (selection by tapping, never by typing an ID). Same ownership and
@@ -514,16 +522,17 @@ command, and per-currency activity totals.
 
 **Findings:**
 
-- ☐ **(H1, sev 2)** The "group info" command omits the single most
+- ✅ **(H1, sev 2)** The "group info" command omitted the single most
   action-relevant piece of group state: whether an event is active and where new
-  expenses will land (theme T3). A user checking "what's the state here?" gets
-  currency and member info but not the mode.
+  expenses will land (theme T3).
+  **Fixed:** the snapshot now carries an "Active event: …" line (or "none — new
+  expenses are general").
 - ☐ **(H6, sev 1)** The reply is a good dashboard with no exits — it names no
   related commands (`/balance all`, `/event info`) even where its own content
   begs the follow-up (activity totals → balances).
 
-**Recommendations:** ☐ add an "Active event" line (or "No active event — new
-expenses are general") to the snapshot; optionally close with one line of
+**Recommendations:** ✅ add an "Active event" line (or "none — new expenses are
+general") to the snapshot *(done)*; ☐ optionally close with one line of
 related-command pointers. Nothing structural.
 
 **Wizard verdict:** **no.** It's a status read and a good one.

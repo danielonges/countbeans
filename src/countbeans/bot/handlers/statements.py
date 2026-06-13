@@ -39,6 +39,8 @@ router = Router()
 def _entry_lines(e: StatementEntry) -> str:
     when = e.created_at.strftime("%b %d %H:%M")
     actor = display_name(e.actor_username, e.actor_first_name)
+    # Scope tag — appended after "(voided)" so it never reads as "<event> (voided)".
+    tag = f"  ·  🏷️ {e.event_name}" if e.event_name else ""
     if e.kind == "expense":
         head = f"🧾 {when} · {e.description or 'expense'} — {format_money(e.amount_cents, e.currency)}"
         if e.voided:
@@ -46,12 +48,12 @@ def _entry_lines(e: StatementEntry) -> str:
         sub = f"    paid by {actor}"
         if e.participant_count:
             sub += f" · split {e.participant_count}-way"
-        return f"{head}\n{sub}"
+        return f"{head}{tag}\n{sub}"
     other = display_name(e.counterparty_username, e.counterparty_first_name)
     head = f"💸 {when} · {actor} → {other}: {format_money(e.amount_cents, e.currency)}"
     if e.voided:
         head = f"❌ {head} (voided)"
-    return head
+    return f"{head}{tag}"
 
 
 def _render(page: StatementPage, title: str) -> str:

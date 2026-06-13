@@ -101,7 +101,8 @@ class StatementEntry(BaseModel):
     counterparty_username: str | None  # settlement recipient; None for expense
     counterparty_first_name: str | None = None  # display fallback when no @handle
     participant_count: int | None  # expense only
-    voided: bool  # expense only; always False for settlements
+    voided: bool  # True = the entry is voided (expense or settlement)
+    event_name: str | None = None  # the event this entry is tagged to (None = general)
 
 
 class StatementPage(BaseModel):
