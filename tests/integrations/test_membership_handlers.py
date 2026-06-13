@@ -8,7 +8,7 @@ back per test). See CLAUDE.md "Onboarding & membership".
 
 from aiogram import Dispatcher, Router
 from aiogram.filters import Command
-from aiogram.types import Message, Update
+from aiogram.types import InlineKeyboardMarkup, Message, Update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.bot.middleware import AdminGateMiddleware
@@ -44,6 +44,12 @@ async def test_promote_creates_group_and_welcomes(
     group = await read_group(session)
     assert group.bot_is_admin is True
     assert "countbeans" in (bot.last_reply or "").lower()
+    # The welcome carries the one-tap join button.
+    markup = bot.sent[-1].reply_markup
+    assert isinstance(markup, InlineKeyboardMarkup)
+    assert any(
+        b.callback_data == "join:me" for row in markup.inline_keyboard for b in row
+    )
 
 
 async def test_added_as_member_requests_promotion(

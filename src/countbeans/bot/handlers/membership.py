@@ -29,7 +29,11 @@ from aiogram.filters import (
 )
 from aiogram.types import ChatMemberUpdated
 
-from countbeans.bot.handlers._welcome import GROUP_WELCOME, PROMOTE_REQUEST
+from countbeans.bot.handlers._welcome import (
+    GROUP_WELCOME,
+    PROMOTE_REQUEST,
+    WELCOME_KEYBOARD,
+)
 from countbeans.bot.utils.permissions import ADMIN_STATUSES, GROUP_TYPES
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.services.membership import record_member_leave, set_bot_admin
@@ -75,7 +79,7 @@ async def on_my_chat_member(
 
     if is_admin_now and not was_admin:
         # Freshly added as admin, or just promoted — the moment to introduce itself.
-        await bot.send_message(chat.id, GROUP_WELCOME)
+        await bot.send_message(chat.id, GROUP_WELCOME, reply_markup=WELCOME_KEYBOARD)
         logger.info("bot is now admin in chat=%s — sent welcome", chat.id)
     elif not is_admin_now and (was_admin or not was_present):
         # The bot lacks admin and needs it — nudge for promotion. This fires both

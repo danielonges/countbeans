@@ -159,7 +159,7 @@ writes*. `/void` previews with a confirm step, and the `/help` tip was
 rewritten to describe the real, now-uniform behavior (it was also stale for
 `/addexpense`, which starts the wizard rather than showing usage).
 
-### T2 — Computed knowledge should be tappable, not transcribable ◑ (H6, H5, H7 · sev 3)
+### T2 — Computed knowledge should be tappable, not transcribable ✅ (H6, H5, H7 · sev 3)
 
 The bot frequently *knows* the next action and used to render it as prose the
 user had to re-type:
@@ -177,10 +177,10 @@ solved in this product: `/statements` personal pagination rejects non-owners
 with a clear alert, and the wizard anchor is owner-bound. The same gate makes
 "Pay @alice SGD 5.00" safe to show in a group: only the named debtor can tap it.
 
-**Fixed (partial):** the settle-up half shipped (tap-to-pay on bare
-`/settleup`, `/balance`, and `/balance all`, debtor-gated), and `/event info`'s
-action hints became real Pause/Resume/Close buttons.
-**Still open:** the welcome's "run /join".
+**Fixed:** all three are now buttons — tap-to-pay on bare `/settleup`,
+`/balance`, and `/balance all` (debtor-gated); `/event info`'s action hints are
+real Pause/Resume/Close buttons; and the welcome's "run /join" is a "✋ Count me
+in" button.
 
 ### T3 — Mode (active event) needs consistent signaling ☐ (H1 · sev 2–3)
 
@@ -592,15 +592,14 @@ already been mentioned in expenses here — I've linked those to you").
   **Fixed:** the tip now reads "every command is safe to send with no arguments —
   it shows its status or usage instead of acting", true the moment `/void` gained
   its preview.
-- ☐ **(H8, sev 2)** The welcome message is a ten-bullet command reference
-  delivered at the moment the group's task is "get set up," not "learn
-  everything." The two actions that matter at that moment — members join, someone
-  records the first expense — are buried as the last line.
-- ☐ **(H6/H7, sev 2)** Joining requires every member to type `/join`. This is
-  the highest-volume onboarding action and it's a typed command with a well-known
-  button alternative: a "✋ Count me in" button on the welcome message (tappable
-  by anyone, onboarding the tapper) would make joining literally one tap and
-  double as social proof in the chat.
+- ✅ **(H8, sev 2)** The welcome was a ten-bullet command reference delivered at
+  "get set up" time, not "learn everything" time. **Fixed:** it's now a "Two
+  steps to start" message (join + first expense) that points to `/help` for the
+  full list.
+- ✅ **(H6/H7, sev 2)** Joining required every member to type `/join`.
+  **Fixed:** the welcome carries a "✋ Count me in" button that onboards whoever
+  taps it; a real join posts a public "✅ <name> joined" line (social proof),
+  repeat taps just toast.
 - ✅ **(H1, sev 1)** Silent auto-onboarding via the membership stream meant
   `/join` often answered "you're already part of this group's ledger" to someone
   who never joined. **Fixed:** the reply now reads "… (I add everyone
@@ -610,13 +609,13 @@ already been mentioned in expenses here — I've linked those to you").
 
 **Recommendations (feature level):**
 
-- ◑ Rewrite the `/help` tip to describe per-command reality (**done**), or —
+- ✅ Rewrite the `/help` tip to describe per-command reality (**done**), or —
   better — make the bare-command contract uniform (**done**, T1) so the tip can
   be true.
-- ☐ Restructure the welcome into a short "two steps to start" message (join +
+- ✅ Restructure the welcome into a short "two steps to start" message (join +
   first expense), with a "Count me in" join button, and point to `/help` for the
   full reference.
-- ☐ Keep the refusal-message formula exactly as is.
+- ✅ Keep the refusal-message formula exactly as is.
 
 **Wizard verdict:** **no wizards.** One button and shorter words.
 
@@ -635,7 +634,7 @@ already been mentioned in expenses here — I've linked those to you").
 | `/group` | No | ☐ active-event line |
 | `/simplify` | No | ✅ explanatory clause in replies |
 | `/currency` | No | — |
-| `/start` `/join` `/help` | No | ✅ truthful help tip; ☐ join button; ☐ shorter welcome |
+| `/start` `/join` `/help` | No | ✅ truthful help tip, join button, shorter welcome |
 
 ---
 
@@ -659,9 +658,9 @@ already been mentioned in expenses here — I've linked those to you").
    toggle-roster editor.
 5. ☐ **Scope labeling sweep** (`/statements` header, `/group` active-event line)
    and the unrecognized-argument notes on read commands.
-6. ☐ **Onboarding polish** (welcome restructure + join button) and
-   plain-language wording for simplified/raw.
+6. ✅ **Onboarding polish** (welcome restructure + "✋ Count me in" join button)
+   and plain-language wording for simplified/raw.
 
-Priorities 1–2 are complete; 3–4 are mostly done with one follow-up each; 5–6 are
-each a small batch of individually tiny changes that can ride along with adjacent
-work.
+Priorities 1–2, 5, and 6 are complete; 3–4 are done except for two follow-ups —
+a void entry point directly from `/statements`, and the `/event` toggle-roster
+editor.

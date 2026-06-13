@@ -6,13 +6,29 @@ gate, chat-type routing, and which reply text is sent. Needs Postgres (handlers
 onboard) — see conftest.py.
 """
 
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from countbeans.db.models import GroupMember, User
 
-from ._bot_harness import MockedBot, feed, make_message
+from ._bot_harness import (
+    MockedBot,
+    feed,
+    feed_callback,
+    make_callback,
+    make_message,
+)
 from ._seed import seed_group, seed_placeholder
+
+
+def _welcome_has_join_button(bot: MockedBot) -> bool:
+    markup = bot.sent[-1].reply_markup
+    if not isinstance(markup, InlineKeyboardMarkup):
+        return False
+    return any(
+        b.callback_data == "join:me" for row in markup.inline_keyboard for b in row
+    )
 
 
 async def _count_users(session: AsyncSession) -> int:
@@ -48,6 +64,51 @@ async def test_start_admin_onboards_and_welcomes(
 
     assert "countbeans" in (bot.last_reply or "").lower()
     assert await _is_member(session, 2002)  # admin is onboarded, no /join needed
+    assert _welcome_has_join_button(bot)  # ✋ Count me in for the rest of the group
+
+
+async def test_join_button_onboards_tapper_with_social_proof(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Tapping ✋ Count me in onboards the tapper and posts a public 'joined'
+    line; a second tap just toasts (no duplicate public line)."""
+    await seed_group(session)
+    bot = MockedBot()
+    await feed_callback(
+        dispatcher, bot, make_callback("join:me", from_id=7007), session=session
+    )
+
+    assert await _is_member(session, 7007)
+    assert "joined the ledger" in (bot.sent[-1].text or "")  # public social proof
+    assert "in" in ((bot.last_answer.text or "").lower() if bot.last_answer else "")
+
+    # A second tap is idempotent — a private toast, no second public message.
+    public_before = sum("joined the ledger" in (m.text or "") for m in bot.sent)
+    await feed_callback(
+        dispatcher, bot, make_callback("join:me", from_id=7007), session=session
+    )
+    answer = bot.last_answer
+    assert answer is not None and "already in" in (answer.text or "").lower()
+    public_after = sum("joined the ledger" in (m.text or "") for m in bot.sent)
+    assert public_after == public_before  # no extra public line
+
+
+async def test_join_button_claims_placeholder(
+    dispatcher, session: AsyncSession
+) -> None:
+    group = await seed_group(session)
+    await seed_placeholder(session, group, username="ghost")
+    bot = MockedBot()
+    await feed_callback(
+        dispatcher,
+        bot,
+        make_callback("join:me", from_id=8008, username="ghost"),
+        session=session,
+    )
+
+    assert await _is_member(session, 8008)
+    assert "linked" in (bot.sent[-1].text or "").lower()
+    assert await _count_users(session) == 1  # claimed in place, not duplicated
 
 
 async def test_start_in_private_chat_explains_group_only(

@@ -3,6 +3,8 @@ the my_chat_member handler (the bot being added/promoted). The command list live
 in one constant — COMMAND_REFERENCE — so it never drifts between these entry
 points (and stays in step with server.py's terse command-menu descriptions)."""
 
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 # Single source of truth for the human-readable command list (richer one-liners
 # than the constrained Telegram command-menu descriptions in server.py). Both the
 # welcome and /help render from this, so adding a command updates every entry
@@ -22,13 +24,26 @@ COMMAND_REFERENCE = (
     "• /group — group info, members, and activity"
 )
 
+# The welcome lands at "get set up" time, not "learn everything" time — so it's
+# the two actions that matter now (join + first expense), not the full command
+# wall (that's one tap away via /help). The ✋ button makes step 1 a single tap.
 GROUP_WELCOME = (
-    "👋 Hi! I'm countbeans — I track shared expenses for this group so nobody "
-    "has to do the mental math.\n"
+    "👋 Hi! I'm countbeans — I track and split shared expenses for this group, "
+    "so nobody does the mental math.\n"
     "\n"
-    f"{COMMAND_REFERENCE}\n"
+    "Two steps to start:\n"
+    "1️⃣ Everyone taps ✋ Count me in below (or sends /join) to join the ledger.\n"
+    '2️⃣ Anyone records the first expense — e.g. /addexpense 20 "lunch" @alice\n'
     "\n"
-    "Everyone: run /join to be added to this group's ledger."
+    "Full command list any time: /help"
+)
+
+# The one-tap join attached to the welcome. The button's callback (handlers/join.py)
+# onboards whoever taps it, so joining never requires typing /join.
+WELCOME_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="✋ Count me in", callback_data="join:me")]
+    ]
 )
 
 # /help — the on-demand command reference. The payoff line is the tip: a bare

@@ -15,7 +15,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from countbeans.bot.handlers._welcome import GROUP_WELCOME
+from countbeans.bot.handlers._welcome import GROUP_WELCOME, WELCOME_KEYBOARD
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.dto.commands import OnboardUserCommand
 from countbeans.services.onboard import onboard_member
@@ -61,7 +61,7 @@ async def start_group(message: Message, uow: UnitOfWork, bot: Bot) -> None:
         ),
     )
 
-    await message.answer(GROUP_WELCOME)
+    await message.answer(GROUP_WELCOME, reply_markup=WELCOME_KEYBOARD)
     logger.info(
         "Onboarded admin user=%s into group=%s via /start",
         message.from_user.id,
