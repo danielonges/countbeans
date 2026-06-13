@@ -362,19 +362,21 @@ if that's not right") — a nice accountability touch.
   amount all come from the suggestion — nothing to transcribe. The `#general`
   override carries through to the buttons. Typed forms unchanged as the
   accelerator and the only path to partial amounts.
-- ☐ **(H2, sev 2)** The direction convention ("`/settleup @alice` means *I pay
-  Alice*") is invisible in the typed command and only learnable from the usage
-  block. Settling is the moment of highest anxiety in an expense-splitting
-  product — users double-check direction precisely because the syntax doesn't
-  state it. *(The picker sidesteps this for the common case; the typed form
-  still carries it.)*
+- ✅ **(H2, sev 2)** The direction convention ("`/settleup @alice` means *I pay
+  Alice*") was invisible in the typed command. The picker sidesteps it for the
+  common case; for the typed self-settle, **fixed** by making the confirmation
+  second-person — "Settled up: **you paid** @bob …" — which directly answers
+  "did I pay them or did they pay me?".
 - ✅ **(H3, sev 3)** **No undo.** A settlement recorded with the wrong amount or
   counterparty was permanent.
   **Fixed:** settlements are voidable via `/void` like expenses — by either party
   or an admin.
-- ☐ **(H9, sev 1)** The currency-mismatch error explains itself well but makes
-  the user re-issue the whole command with an explicit amount; it could carry
-  the corrected command in copy-paste form.
+- ✅ **(H9, sev 1)** The currency-mismatch error explained itself but pointed
+  at "an explicit amount in that currency" — which the typed `/settleup`
+  couldn't even express. **Fixed:** `/settleup` amounts now take a currency
+  prefix (`EUR50`, `$50`, …, same grammar as `/addexpense`), and the error
+  hands back a ready-to-send correction ("Settle in that currency — e.g.
+  /settleup @bob EUR50.00").
 
 **Recommendations (feature level):**
 

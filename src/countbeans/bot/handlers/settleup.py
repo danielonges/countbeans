@@ -53,7 +53,7 @@ from countbeans.bot.utils.formatting import (
 from countbeans.bot.utils.parsing import (
     extract_general_flag,
     is_all,
-    parse_amount_cents,
+    parse_money,
 )
 from countbeans.bot.utils.permissions import is_admin
 from countbeans.bot.utils.settle_buttons import (
@@ -73,19 +73,21 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-# The command args (CommandObject strips "/settleup" and any "@botname"):
-#   @handle 12.50  |  @handle 12  |  @handle  (amount omitted → auto)  |  @all
-_ARGS_RE = re.compile(r"^@([\w.]+)(?:\s+(\d+(?:\.\d{1,2})?))?$")
+# The command args (CommandObject strips "/settleup" and any "@botname"). The
+# amount slot is a whole non-space token so it can carry a currency prefix
+# (`EUR50`, `€50`, `$50`, `50`) — parse_money validates it, just like /addexpense.
+#   @handle EUR12.50  |  @handle 12  |  @handle  (amount omitted → auto)  |  @all
+_ARGS_RE = re.compile(r"^@([\w.]+)(?:\s+(\S+))?$")
 # The two-handle (admin on-behalf) form, tried first since it is more specific:
-#   @from @to 12.50  |  @from @to  (amount omitted → auto)
-_PAIR_ARGS_RE = re.compile(r"^@([\w.]+)\s+@([\w.]+)(?:\s+(\d+(?:\.\d{1,2})?))?$")
+#   @from @to EUR12.50  |  @from @to  (amount omitted → auto)
+_PAIR_ARGS_RE = re.compile(r"^@([\w.]+)\s+@([\w.]+)(?:\s+(\S+))?$")
 
 _USAGE = (
     "Usage: /settleup                      (see what you owe — tap to settle)\n"
     "       /settleup @username [amount]   (you pay someone)\n"
     "       /settleup @from @to [amount]   (admins — record a pair's payment)\n"
     "       /settleup @all                 (admins — settle the whole group)\n"
-    "Example: /settleup @alice 25.50\n"
+    "Example: /settleup @alice 25.50   (or @alice EUR25.50 for another currency)\n"
     "Omit the amount to settle the full outstanding debt.\n"
     "While an event is active, add #general to settle a general (non-event) debt "
     "instead (no /event pause needed)."
@@ -167,7 +169,7 @@ async def cmd_settleup(
         )
         return
 
-    amount_cents = await _resolve_amount(
+    resolved = await _resolve_amount(
         message,
         uow,
         ctx,
@@ -176,9 +178,11 @@ async def cmd_settleup(
         amount_str=amount_str,
         from_label="you",
         to_label=f"@{target_username}",
+        retry_prefix=f"/settleup @{target_username}",
     )
-    if amount_cents is None:
+    if resolved is None:
         return
+    amount_cents, currency = resolved
 
     result = await _record(
         message,
@@ -187,14 +191,17 @@ async def cmd_settleup(
         from_user=from_user,
         to_user=to_user,
         amount_cents=amount_cents,
+        currency=currency,
         created_by=from_user.id,
     )
     if result is None:
         return
 
     auto_note = " (full amount owed)" if amount_str is None else ""
+    # Second person ("you paid …") states the direction the bare command doesn't:
+    # this is the caller settling their own debt, threaded as a reply to them.
     await message.reply(
-        f"Settled up{ctx.scope_note}: {display_name(from_user.username, from_user.first_name)} paid "
+        f"Settled up{ctx.scope_note}: you paid "
         f"{display_name(to_user.username, to_user.first_name)} "
         f"{format_money(result.amount_cents, result.currency)}{auto_note}{_general_note(ctx)}"
     )
@@ -257,7 +264,7 @@ async def _settle_on_behalf(
         await message.reply("The payer and recipient must be different people.")
         return
 
-    amount_cents = await _resolve_amount(
+    resolved = await _resolve_amount(
         message,
         uow,
         ctx,
@@ -266,9 +273,11 @@ async def _settle_on_behalf(
         amount_str=amount_str,
         from_label=f"@{from_handle}",
         to_label=f"@{to_handle}",
+        retry_prefix=f"/settleup @{from_handle} @{to_handle}",
     )
-    if amount_cents is None:
+    if resolved is None:
         return
+    amount_cents, currency = resolved
 
     # The recording admin is the author (created_by) — an audit trail of who
     # logged a payment they weren't a party to.
@@ -279,6 +288,7 @@ async def _settle_on_behalf(
         from_user=from_user,
         to_user=to_user,
         amount_cents=amount_cents,
+        currency=currency,
         created_by=ctx.caller.id,
     )
     if result is None:
@@ -318,19 +328,25 @@ async def _resolve_amount(
     amount_str: str | None,
     from_label: str,
     to_label: str,
-) -> int | None:
-    """Resolve the settlement amount in cents, or reply with an error and return
-    None. An explicit amount is parsed; an omitted one auto-fills the full
-    suggested from→to transfer in the default currency (the set /balance all
-    shows). `from_label`/`to_label` adapt the copy to self vs. on-behalf."""
+    retry_prefix: str,
+) -> tuple[int, str] | None:
+    """Resolve the settlement ``(amount_cents, currency)``, or reply with an error
+    and return None. An explicit amount is parsed with a currency-aware grammar
+    (`EUR50`, `$50`, `50`) so a non-default-currency debt is settleable by typing;
+    an omitted one auto-fills the full suggested from→to transfer in the scope's
+    currency (the set /balance all shows). `from_label`/`to_label` adapt the copy
+    to self vs. on-behalf; `retry_prefix` is the command minus the amount, so the
+    wrong-currency error can hand back a ready-to-send correction."""
     if amount_str is not None:
         try:
-            return parse_amount_cents(amount_str)
+            currency, cents = parse_money(amount_str, ctx.currency)
         except ValueError:
             await message.reply(
-                "Invalid amount. Please use a positive number, e.g. 25.50"
+                "Invalid amount. Use a positive number, optionally with a "
+                "currency — e.g. 25.50 or EUR25.50."
             )
             return None
+        return cents, currency
 
     owed = await owed_by_currency(
         uow,
@@ -345,9 +361,11 @@ async def _resolve_amount(
         others = [c for c in owed if c != currency]
         if others:
             detail = ", ".join(format_money(owed[c], c) for c in others)
+            c0 = others[0]
+            example = f"{retry_prefix} {c0}{owed[c0] // 100}.{owed[c0] % 100:02d}"
             await message.reply(
                 f"The suggested settlement has {from_label} paying {to_label} in "
-                f"{detail}, not {currency}. Settle with an explicit amount in that currency."
+                f"{detail}, not {currency}. Settle in that currency — e.g. {example}"
             )
         else:
             await message.reply(
@@ -355,7 +373,7 @@ async def _resolve_amount(
                 "Run /balance all to see who to pay."
             )
         return None
-    return owed[currency]
+    return owed[currency], currency
 
 
 async def _record(
@@ -366,19 +384,22 @@ async def _record(
     from_user: User,
     to_user: User,
     amount_cents: int,
+    currency: str,
     created_by: uuid.UUID,
 ) -> SettlementCreatedResult | None:
     """Build the command and record the settlement, replying with the error and
-    returning None on a validation/ledger failure. settle_up raises DomainError
-    with a user-facing message when the settlement breaks a ledger rule (no
-    suggested payment in that direction, or the amount exceeds what's owed)."""
+    returning None on a validation/ledger failure. ``currency`` is the resolved
+    settlement currency (the scope default, or whatever the amount's prefix
+    named). settle_up raises DomainError with a user-facing message when the
+    settlement breaks a ledger rule (no suggested payment in that direction, or
+    the amount exceeds what's owed in that currency)."""
     try:
         cmd = SettleUpCommand(
             group_id=ctx.group.id,
             from_user_id=from_user.id,
             to_user_id=to_user.id,
             amount_cents=amount_cents,
-            currency=ctx.currency,
+            currency=currency,
             event_id=ctx.event_id,
             created_by=created_by,
         )

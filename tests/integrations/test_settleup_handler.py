@@ -90,6 +90,86 @@ async def test_settleup_records_full_owed_amount(
     assert await _settlement_count(session) == 1
 
 
+async def test_settleup_reply_states_direction_second_person(
+    dispatcher, session: AsyncSession
+) -> None:
+    """The self-settle confirmation says 'you paid @bob' — stating the direction
+    the bare command's grammar doesn't."""
+    await _seed_caller_owes_bob(session)
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob", from_id=1001, username="caller"),
+        session=session,
+    )
+    assert "you paid @bob" in (bot.last_reply or "")
+
+
+async def test_settleup_currency_prefix_records_that_currency(
+    dispatcher, session: AsyncSession
+) -> None:
+    """A currency-prefixed amount settles a non-default-currency debt by typing."""
+    group = await seed_group(session)  # default SGD
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    # bob fronts EUR 100 split evenly → caller owes bob EUR 50.
+    await seed_expense(
+        session,
+        group,
+        payer=bob,
+        participants=[caller, bob],
+        amount_cents=10000,
+        currency="EUR",
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob EUR50", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "you paid @bob" in reply and "EUR 50.00" in reply
+    recorded_currency = (
+        await session.execute(select(Settlement.currency))
+    ).scalar_one()
+    assert recorded_currency == "EUR"
+
+
+async def test_settleup_wrong_currency_error_suggests_command(
+    dispatcher, session: AsyncSession
+) -> None:
+    """Omitting the amount when the debt is in a non-default currency now hands
+    back a ready-to-send correction instead of a dead end."""
+    group = await seed_group(session)  # default SGD
+    caller = await seed_member(session, group, telegram_user_id=1001, username="caller")
+    bob = await seed_member(session, group, telegram_user_id=2002, username="bob")
+    await seed_expense(
+        session,
+        group,
+        payer=bob,
+        participants=[caller, bob],
+        amount_cents=10000,
+        currency="EUR",
+    )
+
+    bot = MockedBot()
+    await feed(
+        dispatcher,
+        bot,
+        make_message("/settleup @bob", from_id=1001, username="caller"),
+        session=session,
+    )
+
+    reply = bot.last_reply or ""
+    assert "EUR 50.00" in reply  # names the currency you actually owe
+    assert "/settleup @bob EUR50.00" in reply  # the copy-paste correction
+    assert await _settlement_count(session) == 0  # nothing recorded
+
+
 async def test_settleup_all_refused_for_non_admin(
     dispatcher, session: AsyncSession
 ) -> None:
